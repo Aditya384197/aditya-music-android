@@ -3,6 +3,9 @@ package com.aditya.music.ui.navigation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -10,8 +13,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
+import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.components.MiniPlayer
 import com.aditya.music.ui.screens.*
 import com.aditya.music.ui.viewmodel.MusicViewModel
@@ -113,6 +120,36 @@ fun AdityaNavGraph(
                         onBack = { navController.popBackStack() }
                     )
                 }
+                composable(
+                    route = Screen.AlbumDetail.route,
+                    arguments = listOf(navArgument("albumId") { type = NavType.LongType })
+                ) { entry ->
+                    val albumId = entry.arguments?.getLong("albumId")
+                    val album by viewModel.albums.collectAsState()
+                    val selectedAlbum = album.firstOrNull { it.id == albumId }
+                    MediaDetailScreen(
+                        title = selectedAlbum?.name ?: "Album",
+                        subtitle = selectedAlbum?.artist ?: "Unknown Artist",
+                        songs = selectedAlbum?.songs.orEmpty(),
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+                composable(
+                    route = Screen.ArtistDetail.route,
+                    arguments = listOf(navArgument("artistId") { type = NavType.LongType })
+                ) { entry ->
+                    val artistId = entry.arguments?.getLong("artistId")
+                    val artists by viewModel.artists.collectAsState()
+                    val selectedArtist = artists.firstOrNull { it.id == artistId }
+                    MediaDetailScreen(
+                        title = selectedArtist?.name ?: "Artist",
+                        subtitle = selectedArtist?.let { "${it.albumCount} albums • ${it.songCount} songs" } ?: "",
+                        songs = selectedArtist?.songs.orEmpty(),
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
             }
 
             // Floating MiniPlayer above bottom bar
@@ -126,6 +163,61 @@ fun AdityaNavGraph(
                         onPlayPause = { viewModel.togglePlayPause() },
                         onNext = { viewModel.playNext() },
                         onClick = { navController.navigate(Screen.NowPlaying.route) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MediaDetailScreen(
+    title: String,
+    subtitle: String,
+    songs: List<com.aditya.music.data.model.Song>,
+    viewModel: MusicViewModel,
+    onBack: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(title, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        if (songs.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Text("No songs available")
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize().padding(padding)) {
+                item {
+                    ListItem(
+                        headlineContent = { Text(title, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                        supportingContent = { if (subtitle.isNotBlank()) Text(subtitle) },
+                        leadingContent = { Icon(Icons.Rounded.MusicNote, contentDescription = null) }
+                    )
+                    HorizontalDivider()
+                }
+                items(songs, key = { it.id }) { song ->
+                    ListItem(
+                        headlineContent = { Text(song.title, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) },
+                        supportingContent = { Text("${song.artist} • ${song.formattedDuration}") },
+                        leadingContent = { AdityaLogo(size = 40.dp) },
+                        trailingContent = {
+                            IconButton(onClick = { viewModel.playSongs(songs, songs.indexOf(song)) }) {
+                                Icon(Icons.Rounded.PlayArrow, contentDescription = "Play")
+                            }
+                        },
+                        modifier = Modifier.clickable {
+                            viewModel.playSongs(songs, songs.indexOf(song))
+                        }
                     )
                 }
             }
