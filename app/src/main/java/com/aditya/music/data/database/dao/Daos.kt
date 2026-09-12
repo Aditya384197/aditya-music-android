@@ -51,6 +51,6 @@ interface HistoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun recordPlay(history: HistoryEntity)
 
-    @Query("SELECT songId, COUNT(*) as cnt FROM playback_history GROUP BY songId ORDER BY cnt DESC LIMIT 50")
+    @Query("SELECT songId FROM playback_history GROUP BY songId ORDER BY COUNT(*) DESC LIMIT 50")
     suspend fun getMostPlayedSongIds(): List<Long>
 }
