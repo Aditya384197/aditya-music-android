@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,6 +28,10 @@ import com.aditya.music.media.player.PRESET_FLAT
 import com.aditya.music.media.player.PRESET_POP
 import com.aditya.music.media.player.PRESET_ROCK
 import com.aditya.music.media.player.PRESET_VOCAL
+import com.aditya.music.media.player.ROOM_NONE
+import com.aditya.music.media.player.ROOM_SMALL
+import com.aditya.music.media.player.ROOM_MEDIUM
+import com.aditya.music.media.player.ROOM_LARGE
 import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.viewmodel.MusicViewModel
 
@@ -92,7 +97,7 @@ fun NowPlayingScreen(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                Icons.Rounded.Equalizer,
+                                Icons.Rounded.GraphicEq,
                                 contentDescription = "Equalizer",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(28.dp)
@@ -290,33 +295,44 @@ private fun EqualizerBottomSheet(
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-            Text("Frequency bands", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(4.dp))
+            Text("Clarity", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Slider(value = state.clarityStrength / 1000f, onValueChange = { viewModel.setEqualizerClarity((it * 1000).toInt()) }, enabled = supported)
+            Text("Vocals and mid-range detail", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-            state.bandLevelsMb.forEachIndexed { index, level ->
-                val frequency = state.bandFrequenciesHz.getOrNull(index) ?: 0
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(formatFrequency(frequency), style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            text = formatGain(level),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
+            Spacer(modifier = Modifier.height(14.dp))
+            Text("Room", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(ROOM_NONE, ROOM_SMALL, ROOM_MEDIUM, ROOM_LARGE).forEach { room ->
+                    FilterChip(selected = state.room == room, onClick = { viewModel.setEqualizerRoom(room) }, enabled = supported, label = { Text(room) })
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+            Text("Frequency bands", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text("Drag each vertical band up or down", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(230.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                state.bandLevelsMb.forEachIndexed { index, level ->
+                    val frequency = state.bandFrequenciesHz.getOrNull(index) ?: 0
                     val minMb = state.bandLevelMinMb.toFloat()
                     val maxMb = state.bandLevelMaxMb.toFloat()
                     val span = (maxMb - minMb).coerceAtLeast(1f)
-                    Slider(
-                        value = ((level.toFloat() - minMb) / span).coerceIn(0f, 1f),
-                        onValueChange = {
-                            viewModel.setEqualizerBand(index, (minMb + it * span).toInt())
-                        },
-                        enabled = supported
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(58.dp).fillMaxHeight()) {
+                        Text(formatGain(level), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Box(modifier = Modifier.weight(1f).width(54.dp), contentAlignment = Alignment.Center) {
+                            Slider(
+                                value = ((level.toFloat() - minMb) / span).coerceIn(0f, 1f),
+                                onValueChange = { viewModel.setEqualizerBand(index, (minMb + it * span).toInt()) },
+                                enabled = supported,
+                                modifier = Modifier.width(150.dp).rotate(-90f)
+                            )
+                        }
+                        Text(formatFrequency(frequency), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
+                    }
                 }
             }
 
