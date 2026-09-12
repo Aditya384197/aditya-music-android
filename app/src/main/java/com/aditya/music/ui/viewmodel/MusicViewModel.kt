@@ -104,9 +104,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             isScanning.value = true
             try {
                 val favorites = repository.favoriteSongIds.first().toSet()
-                allSongs.value = repository.scanDeviceSongs().map { song ->
+                val scanned = repository.scanDeviceSongs().map { song ->
                     song.copy(isFavorite = song.id in favorites)
                 }
+                allSongs.value = scanned
+                // Re-resolve the active MediaSession item after a scan. The playback service
+                // can remain alive while the Activity is recreated or reopened.
+                syncCurrentSongFromController()
+                syncQueueFromController()
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
@@ -150,9 +155,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         })
 
-        currentSong.value = allSongs.value.find {
-            it.id == controller.currentMediaItem?.mediaId?.toLongOrNull()
-        }
+        syncCurrentSongFromController()
         isPlaying.value = controller.isPlaying
         currentPosition.value = controller.currentPosition.coerceAtLeast(0)
         isShuffle.value = controller.shuffleModeEnabled
@@ -175,6 +178,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 delay(250)
             }
         }
+    }
+
+    private fun syncCurrentSongFromController() {
+        val controller = mediaController ?: return
+        val currentId = controller.currentMediaItem?.mediaId?.toLongOrNull()
+        currentSong.value = allSongs.value.find { it.id == currentId }
+        currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
     }
 
     private fun syncQueueFromController() {
