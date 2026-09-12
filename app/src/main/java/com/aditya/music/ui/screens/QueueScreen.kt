@@ -3,7 +3,7 @@ package com.aditya.music.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ClearAll
@@ -44,7 +44,7 @@ fun QueueScreen(
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
-            items(queue, key = { it.id }) { song ->
+            itemsIndexed(queue, key = { _, song -> song.id }) { index, song ->
                 val isCurrent = song.id == currentSong?.id
                 ListItem(
                     headlineContent = {
@@ -57,7 +57,7 @@ fun QueueScreen(
                     supportingContent = { Text(song.artist) },
                     leadingContent = { AdityaLogo(size = 32.dp) },
                     trailingContent = { Text(song.formattedDuration) },
-                    modifier = Modifier.clickable { viewModel.playSong(song) }
+                    modifier = Modifier.clickable { viewModel.playQueueIndex(index) }
                 )
             }
         }
