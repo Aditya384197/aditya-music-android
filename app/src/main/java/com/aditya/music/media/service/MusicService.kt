@@ -2,7 +2,6 @@ package com.aditya.music.media.service
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.os.Bundle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -11,11 +10,13 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.aditya.music.MainActivity
+import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerManager
 
 /**
  * Foreground MediaSessionService powering background playback for Aditya Music.
- * Handles audio focus, notifications, lockscreen, bluetooth, and equalizer session bindings.
+ * The equalizer is bound to the real ExoPlayer audio session reported after the
+ * audio output is created, not to the initial placeholder session id.
  */
 @UnstableApi
 class MusicService : MediaLibraryService() {
@@ -23,6 +24,12 @@ class MusicService : MediaLibraryService() {
     private var player: ExoPlayer? = null
     private var mediaSession: MediaLibrarySession? = null
     private var equalizerManager: EqualizerManager? = null
+
+    private val playerListener = object : Player.Listener {
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            rebuildEqualizer(audioSessionId)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -32,26 +39,46 @@ class MusicService : MediaLibraryService() {
             .setUsage(C.USAGE_MEDIA)
             .build()
 
-        player = ExoPlayer.Builder(this)
-            .setAudioAttributes(audioAttributes, true) // Handles Android Audio Focus automatically
-            .setHandleAudioBecomingNoisy(true) // Pauses when headphones unplugged
+        val exoPlayer = ExoPlayer.Builder(this)
+            .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
             .build()
+            .also { it.addListener(playerListener) }
 
-        player?.let { exo ->
-            equalizerManager = EqualizerManager(exo.audioSessionId)
+        player = exoPlayer
+
+        if (exoPlayer.audioSessionId > 0) {
+            rebuildEqualizer(exoPlayer.audioSessionId)
         }
 
         val activityIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, activityIntent,
+            this,
+            0,
+            activityIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        player?.let { exo ->
-            mediaSession = MediaLibrarySession.Builder(this, exo, object : MediaLibrarySession.Callback {})
-                .setSessionActivity(pendingIntent)
-                .build()
+        mediaSession = MediaLibrarySession.Builder(
+            this,
+            exoPlayer,
+            object : MediaLibrarySession.Callback {}
+        )
+            .setSessionActivity(pendingIntent)
+            .build()
+    }
+
+    private fun rebuildEqualizer(audioSessionId: Int) {
+        if (audioSessionId <= 0) return
+
+        equalizerManager?.let { old ->
+            EqualizerController.detach(old)
+            old.release()
         }
+
+        val manager = EqualizerManager(this, audioSessionId)
+        equalizerManager = manager
+        EqualizerController.attach(manager)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -59,13 +86,16 @@ class MusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        EqualizerController.detach(equalizerManager)
         equalizerManager?.release()
-        mediaSession?.run {
-            player.release()
-            release()
-            mediaSession = null
-        }
+        equalizerManager = null
+
+        player?.removeListener(playerListener)
+        mediaSession?.release()
+        mediaSession = null
+        player?.release()
         player = null
+
         super.onDestroy()
     }
 }
