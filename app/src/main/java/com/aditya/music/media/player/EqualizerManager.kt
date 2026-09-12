@@ -3,6 +3,7 @@ package com.aditya.music.media.player
 import android.content.Context
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
+import android.media.audiofx.PresetReverb
 import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +25,8 @@ data class EqualizerState(
     val enabled: Boolean = false,
     val preset: String = PRESET_FLAT,
     val bassStrength: Int = 0,
+    val clarityStrength: Int = 0,
+    val room: String = ROOM_NONE,
     val bandLevelsMb: List<Short> = emptyList(),
     val bandFrequenciesHz: List<Int> = emptyList(),
     val bandLevelMinMb: Int = -1500,
@@ -37,11 +40,17 @@ const val PRESET_DANCE = "Dance"
 const val PRESET_CLASSICAL = "Classical"
 const val PRESET_VOCAL = "Vocal"
 const val PRESET_CUSTOM = "Custom"
+const val ROOM_NONE = "None"
+const val ROOM_SMALL = "Small room"
+const val ROOM_MEDIUM = "Medium room"
+const val ROOM_LARGE = "Large room"
 
 private const val PREFS_NAME = "aditya_music_equalizer"
 private const val KEY_ENABLED = "enabled"
 private const val KEY_PRESET = "preset"
 private const val KEY_BASS = "bass"
+private const val KEY_CLARITY = "clarity"
+private const val KEY_ROOM = "room"
 private const val KEY_BANDS = "bands"
 
 private val PRESET_CURVES_DB = mapOf(
@@ -86,6 +95,10 @@ object EqualizerController {
         sync()
     }
 
+    fun setClarityStrength(strength: Int) { manager?.setClarityStrength(strength.coerceIn(0, 1000)); sync() }
+
+    fun setRoom(room: String) { manager?.setRoom(room); sync() }
+
     fun setBandLevel(index: Int, levelMb: Int) {
         manager?.setBandLevel(index, levelMb.toShort())
         sync()
@@ -105,10 +118,13 @@ class EqualizerManager(
 
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
+    private var reverb: PresetReverb? = null
     private var supported = false
     private var enabled = true
     private var preset = PRESET_FLAT
     private var bassStrength = 0
+    private var clarityStrength = 0
+    private var room = ROOM_NONE
     private var bandLevelMinMbInternal = -1500
     private var bandLevelMaxMbInternal = 1500
 
@@ -138,11 +154,8 @@ class EqualizerManager(
                 bandLevelsMbInternal += equalizer?.getBandLevel(band.toShort()) ?: 0
             }
 
-            try {
-                bassBoost = BassBoost(0, audioSessionId)
-            } catch (_: Throwable) {
-                bassBoost = null
-            }
+            try { bassBoost = BassBoost(0, audioSessionId) } catch (_: Throwable) { bassBoost = null }
+            try { reverb = PresetReverb(0, audioSessionId) } catch (_: Throwable) { reverb = null }
 
             loadPersistedSettings()
             applyEnabledState()
@@ -157,6 +170,8 @@ class EqualizerManager(
         enabled = enabled,
         preset = preset,
         bassStrength = bassStrength,
+        clarityStrength = clarityStrength,
+        room = room,
         bandLevelsMb = bandLevelsMbInternal.toList(),
         bandFrequenciesHz = bandFrequenciesHzInternal.toList(),
         bandLevelMinMb = bandLevelMinMbInternal,
@@ -192,6 +207,7 @@ class EqualizerManager(
             else -> 0
         }
         setBassBoostStrengthInternal(bassStrength)
+        setRoom(room)
         preset = canonical
         persist()
     }
@@ -210,6 +226,39 @@ class EqualizerManager(
         setBassBoostStrengthInternal(bassStrength)
         preset = PRESET_CUSTOM
         persist()
+    }
+
+    fun setClarityStrength(strength: Int) {
+        clarityStrength = strength.coerceIn(0, 1000)
+        applyClarity()
+        preset = PRESET_CUSTOM
+        persist()
+    }
+
+    fun setRoom(requested: String) {
+        room = when (requested) { ROOM_SMALL, ROOM_MEDIUM, ROOM_LARGE -> requested; else -> ROOM_NONE }
+        try {
+            reverb?.preset = when (room) {
+                ROOM_SMALL -> PresetReverb.PRESET_SMALLROOM
+                ROOM_MEDIUM -> PresetReverb.PRESET_MEDIUMROOM
+                ROOM_LARGE -> PresetReverb.PRESET_LARGEROOM
+                else -> PresetReverb.PRESET_NONE
+            }
+            reverb?.enabled = enabled && room != ROOM_NONE
+        } catch (_: Throwable) {}
+        persist()
+    }
+
+    private fun applyClarity() {
+        if (bandLevelsMbInternal.isEmpty()) return
+        val range = safeBandLevelRange()
+        val amount = clarityStrength / 1000f
+        bandLevelsMbInternal.indices.forEach { index ->
+            val hz = bandFrequenciesHzInternal[index]
+            val boost = when { hz in 1500..6000 -> (450f * amount).toInt(); hz in 700..9000 -> (180f * amount).toInt(); else -> 0 }
+            val base = bandLevelsMbInternal[index].toInt()
+            setBandLevelInternal(index, (base + boost).coerceIn(range.first, range.second).toShort())
+        }
     }
 
     private fun setBandLevelInternal(band: Int, level: Short) {
@@ -236,10 +285,8 @@ class EqualizerManager(
             equalizer?.enabled = enabled
         } catch (_: Throwable) {
         }
-        try {
-            bassBoost?.enabled = enabled && bassStrength > 0
-        } catch (_: Throwable) {
-        }
+        try { bassBoost?.enabled = enabled && bassStrength > 0 } catch (_: Throwable) {}
+        try { reverb?.enabled = enabled && room != ROOM_NONE } catch (_: Throwable) {}
     }
 
     private fun loadPersistedSettings() {
@@ -248,6 +295,8 @@ class EqualizerManager(
         enabled = prefs.getBoolean(KEY_ENABLED, true)
         preset = prefs.getString(KEY_PRESET, PRESET_FLAT) ?: PRESET_FLAT
         bassStrength = prefs.getInt(KEY_BASS, 0).coerceIn(0, 1000)
+        clarityStrength = prefs.getInt(KEY_CLARITY, 0).coerceIn(0, 1000)
+        room = prefs.getString(KEY_ROOM, ROOM_NONE) ?: ROOM_NONE
 
         val savedBands = prefs.getString(KEY_BANDS, null)
             ?.split(',')
@@ -263,6 +312,8 @@ class EqualizerManager(
         }
 
         setBassBoostStrengthInternal(bassStrength)
+        applyClarity()
+        setRoom(room)
         applyEnabledState()
     }
 
@@ -272,6 +323,8 @@ class EqualizerManager(
             .putBoolean(KEY_ENABLED, enabled)
             .putString(KEY_PRESET, preset)
             .putInt(KEY_BASS, bassStrength)
+            .putInt(KEY_CLARITY, clarityStrength)
+            .putString(KEY_ROOM, room)
             .putString(KEY_BANDS, bandLevelsMbInternal.joinToString(",") { it.toString() })
             .apply()
     }
@@ -285,6 +338,10 @@ class EqualizerManager(
             equalizer?.release()
         } catch (_: Throwable) {
         }
+        try {
+            reverb?.release()
+        } catch (_: Throwable) {}
+        reverb = null
         try {
             bassBoost?.release()
         } catch (_: Throwable) {
