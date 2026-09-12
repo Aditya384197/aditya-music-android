@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Aditya Signature Brand Colors -->
+    <color name="aditya_primary">#6366F1</color>
+    <color name="aditya_primary_variant">#4F46E5</color>
+    <color name="aditya_secondary">#EC4899</color>
+    <color name="aditya_accent">#F59E0B</color>
+    <color name="aditya_dark_bg">#0B0F19</color>
+    <color name="aditya_dark_surface">#161E2E</color>
+    <color name="aditya_dark_card">#1F293D</color>
+</resources>
