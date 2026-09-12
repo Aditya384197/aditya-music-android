@@ -1,6 +1,7 @@
 package com.aditya.music.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,8 +17,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.ExperimentalFoundationApi
 import com.aditya.music.data.model.Song
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MiniPlayer(
     song: Song,
@@ -61,7 +64,10 @@ fun MiniPlayer(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .basicMarquee()
                 )
                 Text(
                     text = song.artist,
