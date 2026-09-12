@@ -130,6 +130,8 @@ class EqualizerManager(
 
     private val bandFrequenciesHzInternal = mutableListOf<Int>()
     private val bandLevelsMbInternal = mutableListOf<Short>()
+    // Raw EQ levels without the temporary clarity overlay.
+    private val baseBandLevelsMbInternal = mutableListOf<Short>()
 
     init {
         initializeEffects()
@@ -152,6 +154,7 @@ class EqualizerManager(
             repeat(bandCount) { band ->
                 bandFrequenciesHzInternal += (equalizer?.getCenterFreq(band.toShort()) ?: 0) / 1000
                 bandLevelsMbInternal += equalizer?.getBandLevel(band.toShort()) ?: 0
+                baseBandLevelsMbInternal += bandLevelsMbInternal.last()
             }
 
             try { bassBoost = BassBoost(0, audioSessionId) } catch (_: Throwable) { bassBoost = null }
@@ -192,10 +195,10 @@ class EqualizerManager(
         }
 
         val curve = PRESET_CURVES_DB[canonical] ?: PRESET_CURVES_DB.getValue(PRESET_FLAT)
-        for (index in bandLevelsMbInternal.indices) {
+        for (index in baseBandLevelsMbInternal.indices) {
             val frequency = bandFrequenciesHzInternal[index].coerceAtLeast(1)
             val db = interpolateCurveDb(frequency, curve)
-            setBandLevelInternal(index, dbToMillibel(db))
+            baseBandLevelsMbInternal[index] = dbToMillibel(db)
         }
 
         bassStrength = when (canonical) {
@@ -206,6 +209,16 @@ class EqualizerManager(
             PRESET_VOCAL -> 60
             else -> 0
         }
+        // Presets own both sliders, so the UI and actual audio always move together.
+        clarityStrength = when (canonical) {
+            PRESET_POP -> 300
+            PRESET_ROCK -> 180
+            PRESET_DANCE -> 220
+            PRESET_CLASSICAL -> 420
+            PRESET_VOCAL -> 650
+            else -> 0
+        }
+        applyAllBandLevels()
         setBassBoostStrengthInternal(bassStrength)
         setRoom(room)
         preset = canonical
@@ -216,7 +229,8 @@ class EqualizerManager(
         if (band !in bandLevelsMbInternal.indices) return
         val range = safeBandLevelRange()
         val clamped = level.toInt().coerceIn(range.first, range.second).toShort()
-        setBandLevelInternal(band, clamped)
+        if (band in baseBandLevelsMbInternal.indices) baseBandLevelsMbInternal[band] = clamped
+        applyAllBandLevels()
         preset = PRESET_CUSTOM
         persist()
     }
@@ -249,15 +263,22 @@ class EqualizerManager(
         persist()
     }
 
-    private fun applyClarity() {
-        if (bandLevelsMbInternal.isEmpty()) return
+    private fun applyClarity() = applyAllBandLevels()
+
+    private fun applyAllBandLevels() {
+        if (baseBandLevelsMbInternal.isEmpty()) return
         val range = safeBandLevelRange()
         val amount = clarityStrength / 1000f
-        bandLevelsMbInternal.indices.forEach { index ->
-            val hz = bandFrequenciesHzInternal[index]
-            val boost = when { hz in 1500..6000 -> (450f * amount).toInt(); hz in 700..9000 -> (180f * amount).toInt(); else -> 0 }
-            val base = bandLevelsMbInternal[index].toInt()
-            setBandLevelInternal(index, (base + boost).coerceIn(range.first, range.second).toShort())
+        baseBandLevelsMbInternal.indices.forEach { index ->
+            val hz = bandFrequenciesHzInternal.getOrElse(index) { 0 }
+            val boost = when {
+                hz in 1500..6000 -> (450f * amount).toInt()
+                hz in 700..9000 -> (180f * amount).toInt()
+                else -> 0
+            }
+            val finalLevel = (baseBandLevelsMbInternal[index].toInt() + boost)
+                .coerceIn(range.first, range.second).toShort()
+            setBandLevelInternal(index, finalLevel)
         }
     }
 
@@ -305,7 +326,7 @@ class EqualizerManager(
         if (!savedBands.isNullOrEmpty() && savedBands.size == bandLevelsMbInternal.size) {
             savedBands.forEachIndexed { index, value ->
                 val range = safeBandLevelRange()
-                setBandLevelInternal(index, value.coerceIn(range.first, range.second).toShort())
+                baseBandLevelsMbInternal[index] = value.coerceIn(range.first, range.second).toShort()
             }
         } else {
             applyPreset(preset)
@@ -325,7 +346,7 @@ class EqualizerManager(
             .putInt(KEY_BASS, bassStrength)
             .putInt(KEY_CLARITY, clarityStrength)
             .putString(KEY_ROOM, room)
-            .putString(KEY_BANDS, bandLevelsMbInternal.joinToString(",") { it.toString() })
+            .putString(KEY_BANDS, baseBandLevelsMbInternal.joinToString(",") { it.toString() })
             .apply()
     }
 
