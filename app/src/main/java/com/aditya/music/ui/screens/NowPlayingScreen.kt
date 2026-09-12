@@ -1,6 +1,7 @@
 package com.aditya.music.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,11 +14,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.ExperimentalFoundationApi
 import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.viewmodel.MusicViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun NowPlayingScreen(
     viewModel: MusicViewModel,
@@ -73,37 +76,55 @@ fun NowPlayingScreen(
                         text = song.title,
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .basicMarquee()
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = song.artist,
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .basicMarquee()
                     )
                     Text(
                         text = song.album,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
                 // Scrub Bar & Time
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    val progress = if (song.duration > 0) currentPosition.toFloat() / song.duration else 0f
+                    var draggingProgress by remember { mutableStateOf<Float?>(null) }
+                    val actualProgress = if (song.duration > 0) currentPosition.toFloat() / song.duration else 0f
+                    val shownProgress = draggingProgress ?: actualProgress
+                    val shownPositionMs = draggingProgress?.let { (it * song.duration).toLong() } ?: currentPosition
+
                     Slider(
-                        value = progress.coerceIn(0f, 1f),
-                        onValueChange = { newProgress ->
-                            viewModel.seekTo((newProgress * song.duration).toLong())
+                        value = shownProgress.coerceIn(0f, 1f),
+                        onValueChange = { draggingProgress = it },
+                        onValueChangeFinished = {
+                            draggingProgress?.let { viewModel.seekTo((it * song.duration).toLong()) }
+                            draggingProgress = null
                         }
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(formatDuration(currentPosition), style = MaterialTheme.typography.bodySmall)
+                        Text(formatDuration(shownPositionMs), style = MaterialTheme.typography.bodySmall)
                         Text(song.formattedDuration, style = MaterialTheme.typography.bodySmall)
                     }
                 }
