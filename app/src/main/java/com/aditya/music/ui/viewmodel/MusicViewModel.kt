@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.aditya.music.data.database.MusicDatabase
@@ -12,6 +13,8 @@ import com.aditya.music.data.model.Artist
 import com.aditya.music.data.model.Playlist
 import com.aditya.music.data.model.Song
 import com.aditya.music.data.repository.MusicRepository
+import com.aditya.music.media.player.EqualizerController
+import com.aditya.music.media.player.EqualizerState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -40,6 +43,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val repeatMode = MutableStateFlow("off")
     val themeMode = MutableStateFlow("system")
 
+    val equalizerState: StateFlow<EqualizerState> = EqualizerController.state
+
     val playlists: StateFlow<List<Playlist>> = repository.getPlaylists()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -47,8 +52,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (query.isBlank()) songs
         else songs.filter {
             it.title.contains(query, ignoreCase = true) ||
-            it.artist.contains(query, ignoreCase = true) ||
-            it.album.contains(query, ignoreCase = true)
+                it.artist.contains(query, ignoreCase = true) ||
+                it.album.contains(query, ignoreCase = true)
         }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -90,17 +95,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onPermissionResult(granted: Boolean) {
         hasPermission.value = granted
-        if (granted) {
-            refreshLibrary()
-        }
+        if (granted) refreshLibrary()
     }
 
     fun refreshLibrary() {
+        if (isScanning.value) return
         viewModelScope.launch {
             isScanning.value = true
             try {
-                val scanned = repository.scanDeviceSongs()
-                allSongs.value = scanned
+                val favorites = repository.favoriteSongIds.first().toSet()
+                allSongs.value = repository.scanDeviceSongs().map { song ->
+                    song.copy(isFavorite = song.id in favorites)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {
@@ -118,10 +124,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val currentId = mediaItem?.mediaId?.toLongOrNull()
-                currentSong.value = allSongs.value.find { it.id == currentId }
-                // A new track just started (tapped, skipped, or auto-advanced) — the elapsed
-                // time must restart from zero, not keep showing the previous track's position.
+                val song = allSongs.value.find { it.id == currentId }
+                currentSong.value = song
                 currentPosition.value = 0L
+                if (song != null && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                    viewModelScope.launch { repository.recordHistory(song.id) }
+                }
                 syncQueueFromController()
             }
 
@@ -141,16 +149,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         })
-        // Pick up whatever the session already had (e.g. after a config change / re-entering screen).
-        currentSong.value = allSongs.value.find { it.id == controller.currentMediaItem?.mediaId?.toLongOrNull() }
+
+        currentSong.value = allSongs.value.find {
+            it.id == controller.currentMediaItem?.mediaId?.toLongOrNull()
+        }
         isPlaying.value = controller.isPlaying
         currentPosition.value = controller.currentPosition.coerceAtLeast(0)
         isShuffle.value = controller.shuffleModeEnabled
+        repeatMode.value = when (controller.repeatMode) {
+            Player.REPEAT_MODE_ALL -> "all"
+            Player.REPEAT_MODE_ONE -> "one"
+            else -> "off"
+        }
         syncQueueFromController()
         startPositionTicker()
     }
 
-    /** Keeps [currentPosition] moving every ~300ms while something is actually playing. */
     private fun startPositionTicker() {
         tickerJob?.cancel()
         tickerJob = viewModelScope.launch {
@@ -158,7 +172,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 mediaController?.let { c ->
                     if (c.isPlaying) currentPosition.value = c.currentPosition.coerceAtLeast(0)
                 }
-                delay(300)
+                delay(250)
             }
         }
     }
@@ -166,20 +180,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private fun syncQueueFromController() {
         val controller = mediaController ?: return
         val songMap = allSongs.value.associateBy { it.id }
-        val items = (0 until controller.mediaItemCount).mapNotNull { i ->
+        playbackQueue.value = (0 until controller.mediaItemCount).mapNotNull { i ->
             songMap[controller.getMediaItemAt(i).mediaId.toLongOrNull()]
         }
-        playbackQueue.value = items
     }
 
-    /** Plays [song] as a standalone track with no queue context (e.g. a single search result). */
     fun playSong(song: Song) = playSongs(listOf(song), 0)
 
-    /**
-     * Sets the whole [context] list as the active playback queue and starts playing the item
-     * at [startIndex]. Passing the real surrounding list (not just one song) is what makes the
-     * next/previous buttons and auto-advance actually work.
-     */
     fun playSongs(context: List<Song>, startIndex: Int) {
         if (context.isEmpty()) return
         val safeIndex = startIndex.coerceIn(context.indices)
@@ -187,22 +194,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         currentSong.value = target
         currentPosition.value = 0L
-        viewModelScope.launch { repository.recordHistory(target.id) }
 
         mediaController?.let { controller ->
-            val mediaItems = context.map { s ->
+            val mediaItems = context.map { song ->
                 MediaItem.Builder()
-                    .setMediaId(s.id.toString())
-                    .setUri(s.contentUri)
+                    .setMediaId(song.id.toString())
+                    .setUri(song.contentUri)
+                    .setMediaMetadata(
+                        MediaMetadata.Builder()
+                            .setTitle(song.title)
+                            .setArtist(song.artist)
+                            .setAlbumTitle(song.album)
+                            .setArtworkUri(song.albumArtUri)
+                            .build()
+                    )
                     .build()
             }
             controller.setMediaItems(mediaItems, safeIndex, 0L)
             controller.prepare()
             controller.play()
         }
+
+        viewModelScope.launch { repository.recordHistory(target.id) }
     }
 
-    /** Jumps to a specific position inside the queue that's already loaded on the player. */
     fun playQueueIndex(index: Int) {
         mediaController?.let { c ->
             if (index in 0 until c.mediaItemCount) {
@@ -213,26 +228,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() {
-        mediaController?.let {
-            if (it.isPlaying) it.pause() else it.play()
+        mediaController?.let { controller ->
+            if (controller.isPlaying) controller.pause() else controller.play()
         }
     }
 
-    fun playNext() {
-        mediaController?.seekToNextMediaItem()
-    }
+    fun playNext() = mediaController?.seekToNextMediaItem()
 
     fun playPrevious() {
-        mediaController?.let { c ->
-            // Standard player UX: restart the current track if we're more than 3s in,
-            // otherwise go to the actual previous track.
-            if (c.currentPosition > 3000) c.seekTo(0L) else c.seekToPreviousMediaItem()
+        mediaController?.let { controller ->
+            if (controller.currentPosition > 3000) controller.seekTo(0L)
+            else controller.seekToPreviousMediaItem()
         }
     }
 
     fun seekTo(positionMs: Long) {
-        currentPosition.value = positionMs
-        mediaController?.seekTo(positionMs)
+        currentPosition.value = positionMs.coerceAtLeast(0L)
+        mediaController?.seekTo(positionMs.coerceAtLeast(0L))
     }
 
     fun toggleShuffle() {
@@ -240,8 +252,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleRepeat() {
-        mediaController?.let { c ->
-            c.repeatMode = when (c.repeatMode) {
+        mediaController?.let { controller ->
+            controller.repeatMode = when (controller.repeatMode) {
                 Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
                 Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
                 else -> Player.REPEAT_MODE_OFF
@@ -252,13 +264,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleFavorite(songId: Long) {
         viewModelScope.launch {
             repository.toggleFavorite(songId)
+            allSongs.update { songs ->
+                songs.map { song ->
+                    if (song.id == songId) song.copy(isFavorite = !song.isFavorite) else song
+                }
+            }
         }
     }
 
     fun createPlaylist(name: String) {
-        viewModelScope.launch {
-            repository.createPlaylist(name)
-        }
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) return
+        viewModelScope.launch { repository.createPlaylist(cleanName) }
     }
 
     fun setSearchQuery(query: String) {
@@ -269,11 +286,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         themeMode.value = theme
     }
 
+    fun setEqualizerEnabled(enabled: Boolean) = EqualizerController.setEnabled(enabled)
+
+    fun applyEqualizerPreset(preset: String) = EqualizerController.applyPreset(preset)
+
+    fun setEqualizerBass(strength: Int) = EqualizerController.setBassStrength(strength)
+
+    fun setEqualizerBand(index: Int, levelMb: Int) = EqualizerController.setBandLevel(index, levelMb)
+
     fun clearQueue() {
-        val c = mediaController ?: return
-        val keepIndex = c.currentMediaItemIndex
-        for (i in c.mediaItemCount - 1 downTo 0) {
-            if (i != keepIndex) c.removeMediaItem(i)
+        val controller = mediaController ?: return
+        val keepIndex = controller.currentMediaItemIndex
+        for (i in controller.mediaItemCount - 1 downTo 0) {
+            if (i != keepIndex) controller.removeMediaItem(i)
         }
+        syncQueueFromController()
     }
 }
