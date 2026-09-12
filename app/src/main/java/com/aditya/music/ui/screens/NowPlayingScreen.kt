@@ -312,8 +312,8 @@ private fun EqualizerBottomSheet(
             Text("Drag each vertical band up or down", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(modifier = Modifier.height(8.dp))
             Row(
-                modifier = Modifier.fillMaxWidth().height(230.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.fillMaxWidth().height(270.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 state.bandLevelsMb.forEachIndexed { index, level ->
@@ -321,14 +321,14 @@ private fun EqualizerBottomSheet(
                     val minMb = state.bandLevelMinMb.toFloat()
                     val maxMb = state.bandLevelMaxMb.toFloat()
                     val span = (maxMb - minMb).coerceAtLeast(1f)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(58.dp).fillMaxHeight()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp).fillMaxHeight()) {
                         Text(formatGain(level), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        Box(modifier = Modifier.weight(1f).width(54.dp), contentAlignment = Alignment.Center) {
+                        Box(modifier = Modifier.weight(1f).width(72.dp), contentAlignment = Alignment.Center) {
                             Slider(
                                 value = ((level.toFloat() - minMb) / span).coerceIn(0f, 1f),
                                 onValueChange = { viewModel.setEqualizerBand(index, (minMb + it * span).toInt()) },
                                 enabled = supported,
-                                modifier = Modifier.width(150.dp).rotate(-90f)
+                                modifier = Modifier.width(220.dp).rotate(-90f)
                             )
                         }
                         Text(formatFrequency(frequency), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
