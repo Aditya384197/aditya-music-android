@@ -292,6 +292,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setEqualizerBass(strength: Int) = EqualizerController.setBassStrength(strength)
 
+    fun setEqualizerClarity(strength: Int) = EqualizerController.setClarityStrength(strength)
+
+    fun setEqualizerRoom(room: String) = EqualizerController.setRoom(room)
+
     fun setEqualizerBand(index: Int, levelMb: Int) = EqualizerController.setBandLevel(index, levelMb)
 
     fun clearQueue() {
