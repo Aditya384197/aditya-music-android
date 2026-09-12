@@ -1,5 +1,6 @@
 package com.aditya.music
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
