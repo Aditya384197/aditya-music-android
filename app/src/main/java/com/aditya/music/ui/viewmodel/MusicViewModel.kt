@@ -12,6 +12,8 @@ import com.aditya.music.data.model.Artist
 import com.aditya.music.data.model.Playlist
 import com.aditya.music.data.model.Song
 import com.aditya.music.data.repository.MusicRepository
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -23,6 +25,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private var mediaController: MediaController? = null
+    private var tickerJob: Job? = null
 
     val isScanning = MutableStateFlow(false)
     val hasPermission = MutableStateFlow(false)
@@ -112,26 +115,100 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying.value = playing
             }
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 val currentId = mediaItem?.mediaId?.toLongOrNull()
                 currentSong.value = allSongs.value.find { it.id == currentId }
+                // A new track just started (tapped, skipped, or auto-advanced) — the elapsed
+                // time must restart from zero, not keep showing the previous track's position.
+                currentPosition.value = 0L
+                syncQueueFromController()
+            }
+
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                syncQueueFromController()
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                isShuffle.value = shuffleModeEnabled
+            }
+
+            override fun onRepeatModeChanged(repeatModeInt: Int) {
+                repeatMode.value = when (repeatModeInt) {
+                    Player.REPEAT_MODE_ALL -> "all"
+                    Player.REPEAT_MODE_ONE -> "one"
+                    else -> "off"
+                }
             }
         })
+        // Pick up whatever the session already had (e.g. after a config change / re-entering screen).
+        currentSong.value = allSongs.value.find { it.id == controller.currentMediaItem?.mediaId?.toLongOrNull() }
+        isPlaying.value = controller.isPlaying
+        currentPosition.value = controller.currentPosition.coerceAtLeast(0)
+        isShuffle.value = controller.shuffleModeEnabled
+        syncQueueFromController()
+        startPositionTicker()
     }
 
-    fun playSong(song: Song) {
-        currentSong.value = song
-        viewModelScope.launch {
-            repository.recordHistory(song.id)
+    /** Keeps [currentPosition] moving every ~300ms while something is actually playing. */
+    private fun startPositionTicker() {
+        tickerJob?.cancel()
+        tickerJob = viewModelScope.launch {
+            while (true) {
+                mediaController?.let { c ->
+                    if (c.isPlaying) currentPosition.value = c.currentPosition.coerceAtLeast(0)
+                }
+                delay(300)
+            }
         }
+    }
+
+    private fun syncQueueFromController() {
+        val controller = mediaController ?: return
+        val songMap = allSongs.value.associateBy { it.id }
+        val items = (0 until controller.mediaItemCount).mapNotNull { i ->
+            songMap[controller.getMediaItemAt(i).mediaId.toLongOrNull()]
+        }
+        playbackQueue.value = items
+    }
+
+    /** Plays [song] as a standalone track with no queue context (e.g. a single search result). */
+    fun playSong(song: Song) = playSongs(listOf(song), 0)
+
+    /**
+     * Sets the whole [context] list as the active playback queue and starts playing the item
+     * at [startIndex]. Passing the real surrounding list (not just one song) is what makes the
+     * next/previous buttons and auto-advance actually work.
+     */
+    fun playSongs(context: List<Song>, startIndex: Int) {
+        if (context.isEmpty()) return
+        val safeIndex = startIndex.coerceIn(context.indices)
+        val target = context[safeIndex]
+
+        currentSong.value = target
+        currentPosition.value = 0L
+        viewModelScope.launch { repository.recordHistory(target.id) }
+
         mediaController?.let { controller ->
-            val mediaItem = MediaItem.Builder()
-                .setMediaId(song.id.toString())
-                .setUri(song.contentUri)
-                .build()
-            controller.setMediaItem(mediaItem)
+            val mediaItems = context.map { s ->
+                MediaItem.Builder()
+                    .setMediaId(s.id.toString())
+                    .setUri(s.contentUri)
+                    .build()
+            }
+            controller.setMediaItems(mediaItems, safeIndex, 0L)
             controller.prepare()
             controller.play()
+        }
+    }
+
+    /** Jumps to a specific position inside the queue that's already loaded on the player. */
+    fun playQueueIndex(index: Int) {
+        mediaController?.let { c ->
+            if (index in 0 until c.mediaItemCount) {
+                c.seekTo(index, 0L)
+                c.play()
+            }
         }
     }
 
@@ -146,7 +223,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playPrevious() {
-        mediaController?.seekToPreviousMediaItem()
+        mediaController?.let { c ->
+            // Standard player UX: restart the current track if we're more than 3s in,
+            // otherwise go to the actual previous track.
+            if (c.currentPosition > 3000) c.seekTo(0L) else c.seekToPreviousMediaItem()
+        }
     }
 
     fun seekTo(positionMs: Long) {
@@ -155,14 +236,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleShuffle() {
-        isShuffle.value = !isShuffle.value
+        mediaController?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
     }
 
     fun toggleRepeat() {
-        repeatMode.value = when (repeatMode.value) {
-            "off" -> "all"
-            "all" -> "one"
-            else -> "off"
+        mediaController?.let { c ->
+            c.repeatMode = when (c.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
         }
     }
 
@@ -187,6 +270,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearQueue() {
-        playbackQueue.value = emptyList()
+        val c = mediaController ?: return
+        val keepIndex = c.currentMediaItemIndex
+        for (i in c.mediaItemCount - 1 downTo 0) {
+            if (i != keepIndex) c.removeMediaItem(i)
+        }
     }
 }
