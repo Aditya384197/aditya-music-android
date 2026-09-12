@@ -118,7 +118,7 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
-                            .clickable { viewModel.playSong(songs.first()) },
+                            .clickable { viewModel.playSongs(songs, 0) },
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.primaryContainer
                         )
@@ -141,7 +141,7 @@ fun HomeScreen(
                                 )
                             }
                             FilledIconButton(
-                                onClick = { viewModel.playSong(songs.first()) }
+                                onClick = { viewModel.playSongs(songs, 0) }
                             ) {
                                 Icon(Icons.Rounded.PlayArrow, contentDescription = "Play")
                             }
@@ -166,7 +166,7 @@ fun HomeScreen(
                                 Card(
                                     modifier = Modifier
                                         .width(140.dp)
-                                        .clickable { viewModel.playSong(song) },
+                                        .clickable { viewModel.playSongs(recentlyPlayed, recentlyPlayed.indexOf(song)) },
                                     shape = RoundedCornerShape(14.dp)
                                 ) {
                                     Column(modifier = Modifier.padding(10.dp)) {
@@ -216,11 +216,11 @@ fun HomeScreen(
                                 AdityaLogo(size = 36.dp)
                             },
                             trailingContent = {
-                                IconButton(onClick = { viewModel.playSong(song) }) {
+                                IconButton(onClick = { viewModel.playSongs(favorites, favorites.indexOf(song)) }) {
                                     Icon(Icons.Rounded.PlayArrow, contentDescription = "Play")
                                 }
                             },
-                            modifier = Modifier.clickable { viewModel.playSong(song) }
+                            modifier = Modifier.clickable { viewModel.playSongs(favorites, favorites.indexOf(song)) }
                         )
                     }
                 }
