@@ -81,7 +81,7 @@ fun SongsScreen(viewModel: MusicViewModel) {
                                 )
                             }
                         },
-                        modifier = Modifier.clickable { viewModel.playSong(song) }
+                        modifier = Modifier.clickable { viewModel.playSongs(songs, songs.indexOf(song)) }
                     )
                 }
             }
