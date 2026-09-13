@@ -1,6 +1,7 @@
 package com.aditya.music.ui.viewmodel
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -29,6 +30,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var mediaController: MediaController? = null
     private var tickerJob: Job? = null
+
+    /**
+     * Resolves the [Song] backing the player's current MediaItem.
+     *
+     * Why this exists: after the OS recreates the service (or while the library is still
+     * being scanned after a cold start), the player already has the restored queue loaded,
+     * but `allSongs` can still be empty for a few seconds. Previously this returned null and
+     * the UI showed "No song loaded" even though a song WAS loaded in ExoPlayer. We now fall
+     * back to building a lightweight Song straight from the MediaItem's persisted metadata
+     * so Now Playing works instantly; it is upgraded to the full Song once the scan finishes.
+     */
+    private fun songFromMediaItem(mediaItem: MediaItem?): Song? {
+        if (mediaItem == null) return null
+        val id = mediaItem.mediaId.toLongOrNull() ?: return null
+        allSongs.value.find { it.id == id }?.let { return it }
+        val md = mediaItem.mediaMetadata
+        val title = md.title?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Title"
+        val artist = md.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
+        val album = md.albumTitle?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Album"
+        return Song(
+            id = id,
+            title = title,
+            artist = artist,
+            album = album,
+            albumId = -1L,
+            duration = 0L,
+            contentUri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY,
+            albumArtUri = md.artworkUri,
+            dateAdded = 0L,
+            size = 0L
+        )
+    }
 
     val isScanning = MutableStateFlow(false)
     val hasPermission = MutableStateFlow(false)
@@ -131,8 +164,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val currentId = mediaItem?.mediaId?.toLongOrNull()
-                val song = allSongs.value.find { it.id == currentId }
+                val song = songFromMediaItem(mediaItem)
                 currentSong.value = song
                 currentPosition.value = 0L
                 if (song != null && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
@@ -185,8 +217,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun syncCurrentSongFromController() {
         val controller = mediaController ?: return
-        val currentId = controller.currentMediaItem?.mediaId?.toLongOrNull()
-        currentSong.value = allSongs.value.find { it.id == currentId }
+        currentSong.value = songFromMediaItem(controller.currentMediaItem)
         currentPosition.value = controller.currentPosition.coerceAtLeast(0L)
     }
 
@@ -244,7 +275,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun togglePlayPause() {
         mediaController?.let { controller ->
-            if (controller.isPlaying) controller.pause() else controller.play()
+            if (controller.isPlaying) {
+                controller.pause()
+            } else {
+                // After the service is recreated, the player can be in STATE_IDLE even though
+                // the queue was restored; calling play() alone does nothing in that state.
+                if (controller.playbackState == Player.STATE_IDLE) {
+                    controller.prepare()
+                }
+                controller.play()
+            }
         }
     }
 
