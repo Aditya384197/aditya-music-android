@@ -134,7 +134,7 @@ class MusicService : MediaLibraryService() {
         val nextIntent = mediaActionPendingIntent(KeyEvent.KEYCODE_MEDIA_NEXT)
 
         val notificationBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_aditya)
+            .setSmallIcon(R.drawable.ic_notification_aditya)
             .setContentTitle(title)
             .setContentText(artist)
             .setSubText(buildProgressText(position, duration, album))
