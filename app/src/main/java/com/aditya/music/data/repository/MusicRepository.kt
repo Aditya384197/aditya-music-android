@@ -30,6 +30,7 @@ class MusicRepository(
 
     val favoriteSongIds: Flow<List<Long>> = favoriteDao.getAllFavoriteSongIds()
     val recentlyPlayedIds: Flow<List<Long>> = historyDao.getRecentlyPlayedIds()
+    val songIdsByPlayCount: Flow<List<Long>> = historyDao.getSongIdsByPlayCount()
 
     /**
      * Efficiently scans the Android MediaStore for local audio files (MP3, WAV, FLAC, AAC, M4A, OGG).
