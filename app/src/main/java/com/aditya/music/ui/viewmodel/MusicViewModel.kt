@@ -45,6 +45,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     val equalizerState: StateFlow<EqualizerState> = EqualizerController.state
 
+    private val _openNowPlayingEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val openNowPlayingEvents = _openNowPlayingEvents.asSharedFlow()
+
     val playlists: StateFlow<List<Playlist>> = repository.getPlaylists()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -226,6 +229,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch { repository.recordHistory(target.id) }
+        _openNowPlayingEvents.tryEmit(Unit)
     }
 
     fun playQueueIndex(index: Int) {
@@ -233,6 +237,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (index in 0 until c.mediaItemCount) {
                 c.seekTo(index, 0L)
                 c.play()
+                _openNowPlayingEvents.tryEmit(Unit)
             }
         }
     }
