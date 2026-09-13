@@ -9,6 +9,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.aditya.music.data.database.MusicDatabase
+import com.aditya.music.data.database.dao.SongPlayCount
 import com.aditya.music.data.model.Album
 import com.aditya.music.data.model.Artist
 import com.aditya.music.data.model.Playlist
@@ -84,13 +85,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val playlists: StateFlow<List<Playlist>> = repository.getPlaylists()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    val filteredSongs: StateFlow<List<Song>> = combine(allSongs, searchQuery) { songs, query ->
-        if (query.isBlank()) songs
-        else songs.filter {
-            it.title.contains(query, ignoreCase = true) ||
-                it.artist.contains(query, ignoreCase = true) ||
-                it.album.contains(query, ignoreCase = true)
+    val filteredSongs: StateFlow<List<Song>> = combine(
+        allSongs,
+        searchQuery,
+        repository.playCounts
+    ) { songs, query, playCounts ->
+        val countMap = playCounts.associate { it.songId to it.playCount }
+        val base = if (query.isBlank()) {
+            songs
+        } else {
+            songs.filter {
+                it.title.contains(query, ignoreCase = true) ||
+                    it.artist.contains(query, ignoreCase = true) ||
+                    it.album.contains(query, ignoreCase = true)
+            }
         }
+        // "Smart" sorting: the songs the user plays the most rise to the top of the list.
+        // Ties and never-played songs stay in alphabetical order underneath.
+        base.sortedWith(
+            compareByDescending<Song> { countMap[it.id] ?: 0 }
+                .thenBy { it.title.lowercase() }
+        )
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val favoriteSongs: StateFlow<List<Song>> = combine(allSongs, repository.favoriteSongIds) { songs, favIds ->
