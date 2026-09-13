@@ -11,16 +11,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Offset
 
 /**
  * Custom Signature Aditya Music Logo.
  * Stylized letter 'A' converging with musical pulse waves and play indicator.
  *
- * Performance note: this used to be a `Canvas` that allocated a new `Path` and a new
- * gradient `Brush` on EVERY draw call. In the song list (one logo per row) fast scrolling
+ * Performance note: this used to be a Canvas that allocated a new Path and a new
+ * gradient Brush on EVERY draw call. In the song list (one logo per row) fast scrolling
  * allocated hundreds of objects per second and caused GC churn / jank on budget devices.
- * The exact same artwork is now built ONCE as a static ImageVector and rendered through
- * the regular vector pipeline, which is cached and GPU-friendly.
+ * The exact same artwork is now built ONCE as a static ImageVector.
  */
 private val AdityaLogoVector: ImageVector by lazy {
     ImageVector.Builder(
@@ -30,8 +30,7 @@ private val AdityaLogoVector: ImageVector by lazy {
         viewportWidth = 100f,
         viewportHeight = 100f
     ).apply {
-        // Stylized outer 'A' with the inner counter-triangle (same shape as before,
-        // scaled from the original relative coordinates to a 100x100 viewport).
+        // Stylized outer 'A' with the inner counter-triangle.
         addPath(
             pathData = listOf(
                 PathNode.MoveTo(50f, 12f),
@@ -49,8 +48,8 @@ private val AdityaLogoVector: ImageVector by lazy {
             ),
             fill = Brush.linearGradient(
                 colors = listOf(Color(0xFF6366F1), Color(0xFFEC4899)),
-                start = androidx.compose.ui.geometry.Offset(0f, 0f),
-                end = androidx.compose.ui.geometry.Offset(100f, 100f)
+                start = Offset(0f, 0f),
+                end = Offset(100f, 100f)
             )
         )
         // Dynamic soundwave dot (circle approximated with cubic curves).
