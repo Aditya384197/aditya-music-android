@@ -9,7 +9,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.aditya.music.data.database.MusicDatabase
-import com.aditya.music.data.database.dao.SongPlayCount
 import com.aditya.music.data.model.Album
 import com.aditya.music.data.model.Artist
 import com.aditya.music.data.model.Playlist
@@ -33,28 +32,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var tickerJob: Job? = null
 
     /**
-     * Resolves the [Song] backing the player's current MediaItem.
-     *
-     * Why this exists: after the OS recreates the service (or while the library is still
-     * being scanned after a cold start), the player already has the restored queue loaded,
-     * but `allSongs` can still be empty for a few seconds. Previously this returned null and
-     * the UI showed "No song loaded" even though a song WAS loaded in ExoPlayer. We now fall
-     * back to building a lightweight Song straight from the MediaItem's persisted metadata
-     * so Now Playing works instantly; it is upgraded to the full Song once the scan finishes.
+     * Resolves the Song backing the player's current MediaItem.
+     * After the OS recreates the service (or while the library is still being scanned
+     * after a cold start), allSongs can be empty even though the player has the
+     * restored queue loaded. We fall back to a lightweight Song built from the
+     * MediaItem's persisted metadata so Now Playing works instantly.
      */
     private fun songFromMediaItem(mediaItem: MediaItem?): Song? {
         if (mediaItem == null) return null
         val id = mediaItem.mediaId.toLongOrNull() ?: return null
         allSongs.value.find { it.id == id }?.let { return it }
         val md = mediaItem.mediaMetadata
-        val title = md.title?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Title"
-        val artist = md.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Artist"
-        val album = md.albumTitle?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Album"
         return Song(
             id = id,
-            title = title,
-            artist = artist,
-            album = album,
+            title = md.title?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Title",
+            artist = md.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Artist",
+            album = md.albumTitle?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Album",
             albumId = -1L,
             duration = 0L,
             contentUri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY,
@@ -88,9 +81,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val filteredSongs: StateFlow<List<Song>> = combine(
         allSongs,
         searchQuery,
-        repository.playCounts
-    ) { songs, query, playCounts ->
-        val countMap = playCounts.associate { it.songId to it.playCount }
+        repository.songIdsByPlayCount
+    ) { songs, query, playOrder ->
+        // Rank map: songs earlier in playOrder get a higher rank (more plays).
+        val rankMap = playOrder.withIndex().associate { (index, songId) ->
+            songId to playOrder.size - index
+        }
         val base = if (query.isBlank()) {
             songs
         } else {
@@ -100,10 +96,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     it.album.contains(query, ignoreCase = true)
             }
         }
-        // "Smart" sorting: the songs the user plays the most rise to the top of the list.
-        // Ties and never-played songs stay in alphabetical order underneath.
+        // Smart sorting: most-played songs first, then alphabetical for ties/unplayed.
         base.sortedWith(
-            compareByDescending<Song> { countMap[it.id] ?: 0 }
+            compareByDescending<Song> { rankMap[it.id] ?: 0 }
                 .thenBy { it.title.lowercase() }
         )
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -293,8 +288,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (controller.isPlaying) {
                 controller.pause()
             } else {
-                // After the service is recreated, the player can be in STATE_IDLE even though
-                // the queue was restored; calling play() alone does nothing in that state.
                 if (controller.playbackState == Player.STATE_IDLE) {
                     controller.prepare()
                 }
