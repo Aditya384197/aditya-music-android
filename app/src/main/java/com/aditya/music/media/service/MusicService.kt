@@ -142,7 +142,7 @@ class MusicService : MediaLibraryService() {
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
-            .setOngoing(true)
+            .setOngoing(currentPlayer.isPlaying)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setShowWhen(false)
             .addAction(
@@ -186,13 +186,21 @@ class MusicService : MediaLibraryService() {
 
         val notification: Notification = notificationBuilder.build()
 
-        // Once playback starts, the service is required to remain foreground. We also intentionally
-        // keep it foreground while paused so the notification remains controllable for one hour.
-        startForeground(NOTIFICATION_ID, notification)
-        notificationManager?.notify(NOTIFICATION_ID, notification)
-
         mainHandler.removeCallbacks(removePausedNotification)
-        if (!currentPlayer.isPlaying) {
+        if (currentPlayer.isPlaying) {
+            // Active playback stays in a foreground service for reliable long-running music.
+            startForeground(NOTIFICATION_ID, notification)
+            notificationManager?.notify(NOTIFICATION_ID, notification)
+        } else {
+            // A paused player does not need a non-dismissible foreground notification. Detach it so
+            // Android can treat it as a normal media notification that the user may swipe away.
+            notificationManager?.notify(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_DETACH)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(false)
+            }
             mainHandler.postDelayed(removePausedNotification, PAUSED_NOTIFICATION_TIMEOUT_MS)
         }
     }
