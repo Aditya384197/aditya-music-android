@@ -3,7 +3,7 @@ package com.aditya.music.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -61,7 +61,10 @@ fun SongsScreen(viewModel: MusicViewModel) {
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-                items(songs, key = { it.id }) { song ->
+                // itemsIndexed: the click lambda needs the index directly instead of
+                // songs.indexOf(song), which scans the whole list (O(n)) on every tap and
+                // caused visible stutter on large libraries.
+                itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
                     ListItem(
                         headlineContent = {
                             Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
@@ -81,7 +84,7 @@ fun SongsScreen(viewModel: MusicViewModel) {
                                 )
                             }
                         },
-                        modifier = Modifier.clickable { viewModel.playSongs(songs, songs.indexOf(song)) }
+                        modifier = Modifier.clickable { viewModel.playSongs(songs, index) }
                     )
                 }
             }
