@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -89,8 +90,8 @@ fun HomeScreen(
                 } else {
                     item {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(recentlyPlayed, key = { it.id }) { song -> RecentSongCard(song) {
-                                viewModel.playSongs(recentlyPlayed, recentlyPlayed.indexOf(song))
+                            itemsIndexed(recentlyPlayed, key = { _, song -> song.id }) { index, song -> RecentSongCard(song) {
+                                viewModel.playSongs(recentlyPlayed, index)
                             } }
                         }
                     }
@@ -114,13 +115,13 @@ fun HomeScreen(
 
                 if (favorites.isNotEmpty()) {
                     item { Text("Favorites", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                    items(favorites.take(5), key = { it.id }) { song ->
+                    itemsIndexed(favorites.take(5), key = { _, song -> song.id }) { favIndex, song ->
                         ListItem(
                             headlineContent = { Text(song.title, fontWeight = FontWeight.SemiBold) },
                             supportingContent = { Text(song.artist) },
                             leadingContent = { AdityaLogo(size = 36.dp) },
-                            trailingContent = { IconButton(onClick = { viewModel.playSongs(favorites, favorites.indexOf(song)) }) { Icon(Icons.Rounded.PlayArrow, "Play") } },
-                            modifier = Modifier.clickable { viewModel.playSongs(favorites, favorites.indexOf(song)) }
+                            trailingContent = { IconButton(onClick = { viewModel.playSongs(favorites, favIndex) }) { Icon(Icons.Rounded.PlayArrow, "Play") } },
+                            modifier = Modifier.clickable { viewModel.playSongs(favorites, favIndex) }
                         )
                     }
                 }
