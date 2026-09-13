@@ -61,9 +61,6 @@ fun SongsScreen(viewModel: MusicViewModel) {
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-                // itemsIndexed: the click lambda needs the index directly instead of
-                // songs.indexOf(song), which scans the whole list (O(n)) on every tap and
-                // caused visible stutter on large libraries.
                 itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
                     ListItem(
                         headlineContent = {
