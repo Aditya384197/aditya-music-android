@@ -33,8 +33,9 @@ import java.util.Locale
  *
  * Responsibilities:
  * - Keep the ExoPlayer/MediaSession independent of the Activity lifecycle.
- * - Keep the media notification + foreground service alive for up to 60 minutes after pause.
- * - Remove the notification after the one-hour paused grace period.
+ * - Keep the media notification + foreground service alive for up to 60 minutes after pause,
+ *   so Android does not kill the process while the user may come back and press Play.
+ * - Exit foreground and remove the notification after the one-hour paused grace period.
  * - Provide previous / play-pause / next controls through the MediaSession.
  * - Keep elapsed/total duration readable without waking the UI every second.
  */
@@ -67,6 +68,9 @@ class MusicService : MediaLibraryService() {
         if (!currentPlayer.isPlaying) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             notificationManager?.cancel(NOTIFICATION_ID)
+            // Nothing is playing and the grace period is over: stop the service so the
+            // process can go to the cached state and be reclaimed by Android.
+            stopSelf()
         }
     }
 
@@ -168,7 +172,9 @@ class MusicService : MediaLibraryService() {
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
-            .setOngoing(currentPlayer.isPlaying)
+            // The notification only exists while this service is running, so keep it
+            // consistent with the foreground state (no swipe-away mid-session).
+            .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setShowWhen(false)
             .addAction(
@@ -213,20 +219,23 @@ class MusicService : MediaLibraryService() {
         val notification: Notification = notificationBuilder.build()
 
         mainHandler.removeCallbacks(removePausedNotification)
-        if (currentPlayer.isPlaying) {
+        if (currentPlayer.isPlaying || startInForegroundRequired) {
             // Active playback stays in a foreground service for reliable long-running music.
-            startForeground(NOTIFICATION_ID, notification)
+            // startInForegroundRequired is set by Media3 when the service was (re)started from
+            // the background — e.g. the user pressed Play on the notification on Android 12+.
+            // Ignoring it caused a ForegroundServiceDidNotStartInTimeException crash, which is
+            // why playback silently died a few minutes after pausing.
+            runCatching { startForeground(NOTIFICATION_ID, notification) }
             notificationManager?.notify(NOTIFICATION_ID, notification)
         } else {
-            // A paused player does not need a non-dismissible foreground notification. Detach it so
-            // Android can treat it as a normal media notification that the user may swipe away.
+            // Paused: REMAIN in the foreground. Previously this branch called
+            // stopForeground(STOP_FOREGROUND_DETACH) immediately, which dropped the process
+            // to "cached" priority, so Android killed it within minutes while paused —
+            // killing the player, the session and the ViewModel together ("No song loaded").
+            // Now the service stays foreground for the grace period and the runnable above
+            // removes the notification and stops the service only after 60 minutes.
+            runCatching { startForeground(NOTIFICATION_ID, notification) }
             notificationManager?.notify(NOTIFICATION_ID, notification)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(false)
-            }
             mainHandler.postDelayed(removePausedNotification, PAUSED_NOTIFICATION_TIMEOUT_MS)
         }
     }
