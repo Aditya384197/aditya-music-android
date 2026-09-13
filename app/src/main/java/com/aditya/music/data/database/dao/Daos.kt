@@ -45,7 +45,7 @@ interface FavoriteDao {
 
 @Dao
 interface HistoryDao {
-    @Query("SELECT songId FROM playback_history ORDER BY playedAt DESC LIMIT 100")
+    @Query("SELECT songId FROM playback_history GROUP BY songId ORDER BY MAX(playedAt) DESC LIMIT 20")
     fun getRecentlyPlayedIds(): Flow<List<Long>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
