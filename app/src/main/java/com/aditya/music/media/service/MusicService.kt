@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.net.Uri
 import android.view.KeyEvent
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,6 +19,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaStyleNotificationHelper
 import com.aditya.music.MainActivity
@@ -279,7 +281,7 @@ class MusicService : MediaLibraryService() {
                             .setArtist(obj.optString("artist"))
                             .setAlbumTitle(obj.optString("album"))
                             .apply {
-                                obj.optString("art").takeIf { it.isNotBlank() }?.let { setArtworkUri(it) }
+                                obj.optString("art").takeIf { it.isNotBlank() }?.let { setArtworkUri(Uri.parse(it)) }
                             }
                             .build()
                     )
@@ -289,10 +291,13 @@ class MusicService : MediaLibraryService() {
                 val index = prefs.getInt(KEY_INDEX, 0).coerceIn(items.indices)
                 val position = prefs.getLong(KEY_POSITION, 0L).coerceAtLeast(0L)
                 restoringState = true
-                targetPlayer.setMediaItems(items, index, position)
-                targetPlayer.prepare()
-                targetPlayer.pause()
-                restoringState = false
+                try {
+                    targetPlayer.setMediaItems(items, index, position)
+                    targetPlayer.prepare()
+                    targetPlayer.pause()
+                } finally {
+                    restoringState = false
+                }
             }
         }.onFailure {
             restoringState = false
