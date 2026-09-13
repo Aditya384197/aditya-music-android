@@ -9,6 +9,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -42,11 +44,16 @@ class MusicService : MediaLibraryService() {
         private const val NOTIFICATION_CHANNEL_NAME = "Music playback"
         private const val NOTIFICATION_ID = 1001
         private const val PAUSED_NOTIFICATION_TIMEOUT_MS = 60L * 60L * 1000L
+        private const val PLAYBACK_STATE_PREFS = "aditya_music_playback_state"
+        private const val KEY_QUEUE = "queue"
+        private const val KEY_INDEX = "index"
+        private const val KEY_POSITION = "position"
     }
 
     private var player: ExoPlayer? = null
     private var mediaSession: MediaLibrarySession? = null
     private var equalizerManager: EqualizerManager? = null
+    private var restoringState = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val notificationManager by lazy {
@@ -64,6 +71,22 @@ class MusicService : MediaLibraryService() {
     private val playerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             rebuildEqualizer(audioSessionId)
+        }
+
+        override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+            persistPlaybackState()
+        }
+
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            persistPlaybackState()
+        }
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            persistPlaybackState()
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            persistPlaybackState()
         }
     }
 
@@ -83,6 +106,7 @@ class MusicService : MediaLibraryService() {
             .also { it.addListener(playerListener) }
 
         player = exoPlayer
+        restorePlaybackState(exoPlayer)
         if (exoPlayer.audioSessionId > 0) {
             rebuildEqualizer(exoPlayer.audioSessionId)
         }
@@ -205,6 +229,76 @@ class MusicService : MediaLibraryService() {
         }
     }
 
+    /**
+     * Saves the complete queue and current position. This is intentionally independent of the
+     * Activity/ViewModel so a paused Media3 service can be recreated by Android without losing
+     * the loaded song. Local content URIs and display metadata are enough to rebuild the queue.
+     */
+    private fun persistPlaybackState() {
+        if (restoringState) return
+        val currentPlayer = player ?: return
+        if (currentPlayer.mediaItemCount == 0) return
+        runCatching {
+            val queue = JSONArray()
+            for (i in 0 until currentPlayer.mediaItemCount) {
+                val item = currentPlayer.getMediaItemAt(i)
+                val metadata = item.mediaMetadata
+                queue.put(JSONObject().apply {
+                    put("id", item.mediaId)
+                    put("uri", item.localConfiguration?.uri?.toString() ?: "")
+                    put("title", metadata.title?.toString() ?: "")
+                    put("artist", metadata.artist?.toString() ?: "")
+                    put("album", metadata.albumTitle?.toString() ?: "")
+                    put("art", metadata.artworkUri?.toString() ?: "")
+                })
+            }
+            getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE).edit()
+                .putString(KEY_QUEUE, queue.toString())
+                .putInt(KEY_INDEX, currentPlayer.currentMediaItemIndex.coerceAtLeast(0))
+                .putLong(KEY_POSITION, currentPlayer.currentPosition.coerceAtLeast(0L))
+                .apply()
+        }
+    }
+
+    private fun restorePlaybackState(targetPlayer: ExoPlayer) {
+        val prefs = getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE)
+        val rawQueue = prefs.getString(KEY_QUEUE, null) ?: return
+        runCatching {
+            val array = JSONArray(rawQueue)
+            val items = ArrayList<androidx.media3.common.MediaItem>(array.length())
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val uri = obj.optString("uri")
+                if (uri.isBlank()) continue
+                items += androidx.media3.common.MediaItem.Builder()
+                    .setMediaId(obj.optString("id"))
+                    .setUri(uri)
+                    .setMediaMetadata(
+                        androidx.media3.common.MediaMetadata.Builder()
+                            .setTitle(obj.optString("title"))
+                            .setArtist(obj.optString("artist"))
+                            .setAlbumTitle(obj.optString("album"))
+                            .apply {
+                                obj.optString("art").takeIf { it.isNotBlank() }?.let { setArtworkUri(it) }
+                            }
+                            .build()
+                    )
+                    .build()
+            }
+            if (items.isNotEmpty()) {
+                val index = prefs.getInt(KEY_INDEX, 0).coerceIn(items.indices)
+                val position = prefs.getLong(KEY_POSITION, 0L).coerceAtLeast(0L)
+                restoringState = true
+                targetPlayer.setMediaItems(items, index, position)
+                targetPlayer.prepare()
+                targetPlayer.pause()
+                restoringState = false
+            }
+        }.onFailure {
+            restoringState = false
+        }
+    }
+
     private fun mediaActionPendingIntent(keyCode: Int): PendingIntent {
         val intent = Intent(this, MusicService::class.java).apply {
             action = Intent.ACTION_MEDIA_BUTTON
@@ -291,6 +385,7 @@ class MusicService : MediaLibraryService() {
         player?.removeListener(playerListener)
         mediaSession?.release()
         mediaSession = null
+        persistPlaybackState()
         player?.release()
         player = null
 
