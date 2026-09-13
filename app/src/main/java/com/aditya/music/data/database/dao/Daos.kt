@@ -4,15 +4,6 @@ import androidx.room.*
 import com.aditya.music.data.database.entity.*
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Lightweight query-result POJO for per-song play counts.
- * Not a Room entity — only used to carry COUNT(*) results out of the DAO.
- */
-data class SongPlayCount(
-    val songId: Long,
-    val playCount: Int
-)
-
 @Dao
 interface PlaylistDao {
     @Query("SELECT * FROM playlists ORDER BY name ASC")
@@ -63,11 +54,7 @@ interface HistoryDao {
     @Query("SELECT songId FROM playback_history GROUP BY songId ORDER BY COUNT(*) DESC LIMIT 50")
     suspend fun getMostPlayedSongIds(): List<Long>
 
-    /**
-     * Har gaane ka total play count, real-time Flow ke through.
-     * Iska use SongsScreen me list ko "sabse zyada chalne wala gaana pehle"
-     * ke hisaab se sort karne ke liye hota hai.
-     */
-    @Query("SELECT songId, COUNT(*) as playCount FROM playback_history GROUP BY songId")
-    fun getAllPlayCounts(): Flow<List<SongPlayCount>>
+    /** All songIds ordered by play count (most played first). Used for smart sorting. */
+    @Query("SELECT songId FROM playback_history GROUP BY songId ORDER BY COUNT(*) DESC")
+    fun getSongIdsByPlayCount(): Flow<List<Long>>
 }
