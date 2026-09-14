@@ -152,33 +152,56 @@ class MusicRepository(
      * here, so [NeedsPermission] hands the caller an IntentSender to launch for that confirmation.
      */
     sealed class DeleteResult {
-        object Success : DeleteResult()
+        data class Success(val deletedCount: Int) : DeleteResult()
         data class NeedsPermission(val intentSender: android.content.IntentSender) : DeleteResult()
         object Failure : DeleteResult()
     }
 
+    /** Deletes a single song file from the device via MediaStore. */
+    suspend fun deleteSong(song: Song): DeleteResult = deleteSongs(listOf(song))
+
     /**
-     * Deletes a song file from the device via MediaStore.
+     * Deletes multiple song files via MediaStore.
+     *
+     * Songs the app can already remove (e.g. ones it created itself, or on pre-Android-10 devices)
+     * are deleted immediately. If any of the remaining songs need the user's confirmation, this
+     * asks for ALL of them in a single system dialog (via [MediaStore.createDeleteRequest]) instead
+     * of prompting once per song - the caller should retry nothing after that dialog is confirmed;
+     * the system performs the deletion itself.
      */
-    suspend fun deleteSong(song: Song): DeleteResult = withContext(Dispatchers.IO) {
-        try {
-            val rows = contentResolver.delete(song.contentUri, null, null)
-            if (rows > 0) DeleteResult.Success else DeleteResult.Failure
-        } catch (securityException: SecurityException) {
-            val intentSender = when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                    MediaStore.createDeleteRequest(contentResolver, listOf(song.contentUri)).intentSender
-                }
-                Build.VERSION.SDK_INT == Build.VERSION_CODES.Q &&
-                    securityException is android.app.RecoverableSecurityException -> {
-                    securityException.userAction.actionIntent.intentSender
-                }
-                else -> null
+    suspend fun deleteSongs(songs: List<Song>): DeleteResult = withContext(Dispatchers.IO) {
+        if (songs.isEmpty()) return@withContext DeleteResult.Failure
+        var deletedCount = 0
+        val needsPermissionUris = mutableListOf<Uri>()
+        for (song in songs) {
+            try {
+                val rows = contentResolver.delete(song.contentUri, null, null)
+                if (rows > 0) deletedCount++
+            } catch (securityException: SecurityException) {
+                needsPermissionUris += song.contentUri
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            if (intentSender != null) DeleteResult.NeedsPermission(intentSender) else DeleteResult.Failure
-        } catch (e: Exception) {
-            e.printStackTrace()
-            DeleteResult.Failure
         }
+        if (needsPermissionUris.isNotEmpty()) {
+            val intentSender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // One combined confirmation dialog for every remaining song.
+                MediaStore.createDeleteRequest(contentResolver, needsPermissionUris).intentSender
+            } else if (needsPermissionUris.size == 1) {
+                // Pre-R (API 29 and below) has no batched request API. A single leftover item can
+                // still fall back to the per-item RecoverableSecurityException flow.
+                try {
+                    contentResolver.delete(needsPermissionUris[0], null, null)
+                    null
+                } catch (securityException: SecurityException) {
+                    (securityException as? android.app.RecoverableSecurityException)
+                        ?.userAction?.actionIntent?.intentSender
+                }
+            } else {
+                null
+            }
+            if (intentSender != null) return@withContext DeleteResult.NeedsPermission(intentSender)
+        }
+        if (deletedCount > 0) DeleteResult.Success(deletedCount) else DeleteResult.Failure
     }
 }
