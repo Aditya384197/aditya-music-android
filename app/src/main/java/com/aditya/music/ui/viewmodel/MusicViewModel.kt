@@ -363,20 +363,46 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _deleteResultEvents.tryEmit(true)
     }
 
-    fun shareSong(song: Song, context: android.content.Context) {
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "audio/*"
-            putExtra(Intent.EXTRA_STREAM, song.contentUri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(shareIntent, "Share \"${song.title}\""))
+    /** Called if the user backs out of the system permission dialog instead of confirming. */
+    fun onDeletePermissionDenied() {
+        _deleteResultEvents.tryEmit(false)
     }
 
-    fun deleteSong(song: Song) {
+    fun shareSong(song: Song, context: android.content.Context) = shareSongs(listOf(song), context)
+
+    fun shareSongs(songs: List<Song>, context: android.content.Context) {
+        if (songs.isEmpty()) return
+        val shareIntent = if (songs.size == 1) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = "audio/*"
+                putExtra(Intent.EXTRA_STREAM, songs[0].contentUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "audio/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(songs.map { it.contentUri }))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        val label = if (songs.size == 1) "Share \"${songs[0].title}\"" else "Share ${songs.size} songs"
+        context.startActivity(Intent.createChooser(shareIntent, label))
+    }
+
+    fun deleteSong(song: Song) = deleteSongs(listOf(song))
+
+    /**
+     * Deletes one or more songs. If Android needs the user to confirm first, this asks for
+     * everything in [songs] via a single system dialog rather than prompting once per song -
+     * see [deletePermissionRequest].
+     */
+    fun deleteSongs(songs: List<Song>) {
+        if (songs.isEmpty()) return
         viewModelScope.launch {
-            when (val result = repository.deleteSong(song)) {
+            when (val result = repository.deleteSongs(songs)) {
                 is MusicRepository.DeleteResult.Success -> {
-                    allSongs.update { songs -> songs.filterNot { it.id == song.id } }
+                    val deletedIds = songs.map { it.id }.toSet()
+                    allSongs.update { list -> list.filterNot { it.id in deletedIds } }
                     _deleteResultEvents.tryEmit(true)
                 }
                 is MusicRepository.DeleteResult.NeedsPermission -> {
