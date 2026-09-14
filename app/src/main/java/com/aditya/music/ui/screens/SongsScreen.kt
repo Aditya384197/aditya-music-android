@@ -1,6 +1,8 @@
 package com.aditya.music.ui.screens
 
-import androidx.compose.foundation.clickable
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -10,17 +12,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.aditya.music.data.model.Song
 import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.viewmodel.MusicViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SongsScreen(viewModel: MusicViewModel) {
     val songs by viewModel.filteredSongs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     var showSortMenu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // Long-press menu state
+    var menuSong by remember { mutableStateOf<Song?>(null) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var songToDelete by remember { mutableStateOf<Song?>(null) }
 
     Scaffold(
         topBar = {
@@ -37,7 +47,6 @@ fun SongsScreen(viewModel: MusicViewModel) {
         Column(
             modifier = Modifier.fillMaxSize().padding(padding)
         ) {
-            // Live Search Bar
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { viewModel.setSearchQuery(it) },
@@ -67,7 +76,7 @@ fun SongsScreen(viewModel: MusicViewModel) {
                             Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         },
                         supportingContent = {
-                            Text("${song.artist} • ${song.formattedDuration}", maxLines = 1)
+                            Text("${'$'}{song.artist} • ${'$'}{song.formattedDuration}", maxLines = 1)
                         },
                         leadingContent = {
                             AdityaLogo(size = 38.dp)
@@ -81,10 +90,85 @@ fun SongsScreen(viewModel: MusicViewModel) {
                                 )
                             }
                         },
-                        modifier = Modifier.clickable { viewModel.playSongs(songs, index) }
+                        modifier = Modifier.combinedClickable(
+                            onClick = { viewModel.playSongs(songs, index) },
+                            onLongClick = { menuSong = song }
+                        )
                     )
                 }
             }
+        }
+    }
+
+    // Long-press dropdown menu
+    menuSong?.let { song ->
+        DropdownMenu(
+            expanded = true,
+            onDismissRequest = { menuSong = null }
+        ) {
+            DropdownMenuItem(
+                text = { Text("Play") },
+                leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) },
+                onClick = {
+                    val idx = songs.indexOf(song)
+                    if (idx >= 0) viewModel.playSongs(songs, idx)
+                    menuSong = null
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Share") },
+                leadingIcon = { Icon(Icons.Rounded.Share, null) },
+                onClick = {
+                    viewModel.shareSong(song, context)
+                    menuSong = null
+                }
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Add to Playlist") },
+                leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, null) },
+                onClick = {
+                    Toast.makeText(context, "Playlist feature coming soon", Toast.LENGTH_SHORT).show()
+                    menuSong = null
+                }
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                onClick = {
+                    songToDelete = song
+                    showDeleteDialog = true
+                    menuSong = null
+                }
+            )
+        }
+    }
+
+    // Delete confirmation dialog
+    if (showDeleteDialog) {
+        songToDelete?.let { song ->
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false; songToDelete = null },
+                title = { Text("Delete song?") },
+                text = { Text("\"${'$'}{song.title}\" will be permanently deleted from your device.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteSong(song)
+                            showDeleteDialog = false
+                            songToDelete = null
+                            Toast.makeText(context, "Deleted: ${'$'}{song.title}", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) { Text("Delete") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteDialog = false; songToDelete = null }) { Text("Cancel") }
+                }
+            )
         }
     }
 }
