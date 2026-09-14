@@ -169,7 +169,7 @@ class MusicService : MediaLibraryService() {
             .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
-            .setOngoing(true)
+            .setOngoing(currentPlayer.isPlaying)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setShowWhen(false)
             .addAction(
@@ -215,15 +215,12 @@ class MusicService : MediaLibraryService() {
 
         mainHandler.removeCallbacks(removePausedNotification)
         if (currentPlayer.isPlaying || startInForegroundRequired) {
-            // Active playback (or a background start that Android requires to be foreground,
-            // e.g. pressing Play on the notification on Android 12+) stays in a foreground
-            // service. Ignoring startInForegroundRequired caused a background crash.
             runCatching { startForeground(NOTIFICATION_ID, notification) }
             notificationManager?.notify(NOTIFICATION_ID, notification)
         } else {
-            // Paused: REMAIN in the foreground so Android does not kill the process within
-            // minutes while the user may come back and press Play. The runnable above removes
-            // the notification and stops the service after the 60-minute grace period.
+            // Paused: keep service in foreground so Android does not kill the process,
+            // but the notification is dismissible (setOngoing=false above) so the user
+            // can swipe it away if they want. The 60-minute timer still stops the service.
             runCatching { startForeground(NOTIFICATION_ID, notification) }
             notificationManager?.notify(NOTIFICATION_ID, notification)
             mainHandler.postDelayed(removePausedNotification, PAUSED_NOTIFICATION_TIMEOUT_MS)
