@@ -351,6 +351,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         syncQueueFromController()
     }
+    private val _deletePermissionRequest = MutableSharedFlow<android.content.IntentSender>(extraBufferCapacity = 1)
+    val deletePermissionRequest = _deletePermissionRequest.asSharedFlow()
+
+    private val _deleteResultEvents = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+    val deleteResultEvents = _deleteResultEvents.asSharedFlow()
+
+    /** Called after the user confirms deletion in the system permission dialog. */
+    fun onDeletePermissionGranted() {
+        refreshLibrary()
+        _deleteResultEvents.tryEmit(true)
+    }
+
     fun shareSong(song: Song, context: android.content.Context) {
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "audio/*"
@@ -362,9 +374,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteSong(song: Song) {
         viewModelScope.launch {
-            val success = repository.deleteSong(song)
-            if (success) {
-                allSongs.update { songs -> songs.filterNot { it.id == song.id } }
+            when (val result = repository.deleteSong(song)) {
+                is MusicRepository.DeleteResult.Success -> {
+                    allSongs.update { songs -> songs.filterNot { it.id == song.id } }
+                    _deleteResultEvents.tryEmit(true)
+                }
+                is MusicRepository.DeleteResult.NeedsPermission -> {
+                    _deletePermissionRequest.tryEmit(result.intentSender)
+                }
+                MusicRepository.DeleteResult.Failure -> {
+                    _deleteResultEvents.tryEmit(false)
+                }
             }
         }
     }
