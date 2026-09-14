@@ -214,15 +214,26 @@ class MusicService : MediaLibraryService() {
         val notification: Notification = notificationBuilder.build()
 
         mainHandler.removeCallbacks(removePausedNotification)
-        if (currentPlayer.isPlaying || startInForegroundRequired) {
+        if (currentPlayer.isPlaying) {
+            // Active playback stays in a foreground service for reliable long-running music.
             runCatching { startForeground(NOTIFICATION_ID, notification) }
-            notificationManager?.notify(NOTIFICATION_ID, notification)
         } else {
-            // Paused: keep service in foreground so Android does not kill the process,
-            // but the notification is dismissible (setOngoing=false above) so the user
-            // can swipe it away if they want. The 60-minute timer still stops the service.
-            runCatching { startForeground(NOTIFICATION_ID, notification) }
+            if (startInForegroundRequired) {
+                // Android requires startForeground() to be called at least once when the service
+                // was started via startForegroundService() (e.g. a media-button "play" that had to
+                // cold-start us). Satisfy that contract, then immediately detach below so the
+                // notification stops being a pinned foreground notification.
+                runCatching { startForeground(NOTIFICATION_ID, notification) }
+            }
             notificationManager?.notify(NOTIFICATION_ID, notification)
+            // A paused player does not need a non-dismissible foreground notification. Detach it so
+            // Android treats it as a normal notification that the user can swipe away if they want.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_DETACH)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(false)
+            }
             mainHandler.postDelayed(removePausedNotification, PAUSED_NOTIFICATION_TIMEOUT_MS)
         }
     }
@@ -288,9 +299,13 @@ class MusicService : MediaLibraryService() {
                 val position = prefs.getLong(KEY_POSITION, 0L).coerceAtLeast(0L)
                 restoringState = true
                 try {
+                    // No explicit pause() here: ExoPlayer already defaults to playWhenReady = false,
+                    // so restoring never auto-plays on its own. Calling pause() used to race with an
+                    // incoming notification/lock-screen "play" tap that cold-starts this very service
+                    // (after Android kills it) — whichever command reached the player last would win,
+                    // so the tap that woke the service up could get silently overridden back to paused.
                     targetPlayer.setMediaItems(items, index, position)
                     targetPlayer.prepare()
-                    targetPlayer.pause()
                 } finally {
                     restoringState = false
                 }
