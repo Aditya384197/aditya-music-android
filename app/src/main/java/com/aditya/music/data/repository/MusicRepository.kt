@@ -145,4 +145,18 @@ class MusicRepository(
     }
 
     fun getSongsForPlaylist(playlistId: Long): Flow<List<Long>> = playlistDao.getSongIdsForPlaylist(playlistId)
+
+    /**
+     * Deletes a song file from the device via MediaStore.
+     * Returns true if deletion was successful.
+     */
+    suspend fun deleteSong(song: com.aditya.music.data.model.Song): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val rows = contentResolver.delete(song.contentUri, null, null)
+            rows > 0
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }
