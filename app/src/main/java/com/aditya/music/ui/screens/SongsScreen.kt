@@ -31,18 +31,26 @@ fun SongsScreen(viewModel: MusicViewModel) {
     var showSortMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // Long-press menu state
-    var menuSong by remember { mutableStateOf<Song?>(null) }
+    // Multi-select state. Selection mode is simply "one or more ids selected".
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    val isSelectionMode = selectedIds.isNotEmpty()
     var showDeleteDialog by remember { mutableStateOf(false) }
-    var songToDelete by remember { mutableStateOf<Song?>(null) }
 
-    // Android 10+ requires user confirmation (a system dialog) before this app can delete a
-    // song it didn't create itself. This launcher shows that dialog when needed.
+    fun clearSelection() { selectedIds = emptySet() }
+    fun toggleSelection(id: Long) {
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+
+    // Android 10+ requires user confirmation (a system dialog) before this app can delete
+    // songs it didn't create itself. This launcher shows that dialog when needed, and it now
+    // covers every selected song in ONE dialog instead of one prompt per song.
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             viewModel.onDeletePermissionGranted()
+        } else {
+            viewModel.onDeletePermissionDenied()
         }
     }
 
@@ -56,22 +64,52 @@ fun SongsScreen(viewModel: MusicViewModel) {
         viewModel.deleteResultEvents.collect { success ->
             Toast.makeText(
                 context,
-                if (success) "Song deleted" else "Couldn't delete song",
+                if (success) "Deleted" else "Delete cancelled",
                 Toast.LENGTH_SHORT
             ).show()
+            if (success) clearSelection()
         }
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Songs (${songs.size})", fontWeight = FontWeight.Bold) },
-                actions = {
-                    IconButton(onClick = { showSortMenu = !showSortMenu }) {
-                        Icon(Icons.Rounded.Sort, contentDescription = "Sort")
+            if (isSelectionMode) {
+                TopAppBar(
+                    title = { Text("${selectedIds.size} selected") },
+                    navigationIcon = {
+                        IconButton(onClick = { clearSelection() }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Cancel selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { selectedIds = songs.map { it.id }.toSet() }) {
+                            Icon(Icons.Rounded.SelectAll, contentDescription = "Select all")
+                        }
+                        IconButton(onClick = {
+                            viewModel.shareSongs(songs.filter { it.id in selectedIds }, context)
+                        }) {
+                            Icon(Icons.Rounded.Share, contentDescription = "Share")
+                        }
+                        IconButton(onClick = {
+                            Toast.makeText(context, "Playlist feature coming soon", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Rounded.PlaylistAdd, contentDescription = "Add to playlist")
+                        }
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Rounded.Delete, contentDescription = "Delete")
+                        }
                     }
-                }
-            )
+                )
+            } else {
+                TopAppBar(
+                    title = { Text("Songs (${songs.size})", fontWeight = FontWeight.Bold) },
+                    actions = {
+                        IconButton(onClick = { showSortMenu = !showSortMenu }) {
+                            Icon(Icons.Rounded.Sort, contentDescription = "Sort")
+                        }
+                    }
+                )
+            }
         }
     ) { padding ->
         Column(
@@ -101,21 +139,23 @@ fun SongsScreen(viewModel: MusicViewModel) {
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
-                    // Anchored to this exact row (a Box wraps both the row and its menu) so the
-                    // dropdown opens next to the song that was long-pressed instead of drifting to
-                    // a fixed corner of the screen.
-                    Box {
-                        ListItem(
-                            headlineContent = {
-                                Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                            },
-                            supportingContent = {
-                                Text("${song.artist} • ${song.formattedDuration}", maxLines = 1)
-                            },
-                            leadingContent = {
+                    val isSelected = song.id in selectedIds
+                    ListItem(
+                        headlineContent = {
+                            Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        },
+                        supportingContent = {
+                            Text("${song.artist} • ${song.formattedDuration}", maxLines = 1)
+                        },
+                        leadingContent = {
+                            if (isSelectionMode) {
+                                Checkbox(checked = isSelected, onCheckedChange = { toggleSelection(song.id) })
+                            } else {
                                 AdityaLogo(size = 38.dp)
-                            },
-                            trailingContent = {
+                            }
+                        },
+                        trailingContent = {
+                            if (!isSelectionMode) {
                                 IconButton(onClick = { viewModel.toggleFavorite(song.id) }) {
                                     Icon(
                                         imageVector = if (song.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -123,82 +163,57 @@ fun SongsScreen(viewModel: MusicViewModel) {
                                         tint = if (song.isFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+                            }
+                        },
+                        colors = if (isSelected) {
+                            ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                        } else {
+                            ListItemDefaults.colors()
+                        },
+                        modifier = Modifier.combinedClickable(
+                            onClick = {
+                                if (isSelectionMode) toggleSelection(song.id)
+                                else viewModel.playSongs(songs, index)
                             },
-                            modifier = Modifier.combinedClickable(
-                                onClick = { viewModel.playSongs(songs, index) },
-                                onLongClick = { menuSong = song }
-                            )
+                            // Hold a song for ~1 second to enter selection mode - matches the
+                            // familiar "hold to select" gesture from gallery/file-manager apps.
+                            onLongClick = { toggleSelection(song.id) }
                         )
-
-                        DropdownMenu(
-                            expanded = menuSong?.id == song.id,
-                            onDismissRequest = { menuSong = null }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Play") },
-                                leadingIcon = { Icon(Icons.Rounded.PlayArrow, null) },
-                                onClick = {
-                                    viewModel.playSongs(songs, index)
-                                    menuSong = null
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Share") },
-                                leadingIcon = { Icon(Icons.Rounded.Share, null) },
-                                onClick = {
-                                    viewModel.shareSong(song, context)
-                                    menuSong = null
-                                }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Add to Playlist") },
-                                leadingIcon = { Icon(Icons.Rounded.PlaylistAdd, null) },
-                                onClick = {
-                                    Toast.makeText(context, "Playlist feature coming soon", Toast.LENGTH_SHORT).show()
-                                    menuSong = null
-                                }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = { Icon(Icons.Rounded.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                                onClick = {
-                                    songToDelete = song
-                                    showDeleteDialog = true
-                                    menuSong = null
-                                }
-                            )
-                        }
-                    }
+                    )
                 }
             }
         }
     }
 
-    // Delete confirmation dialog
+    // Delete confirmation dialog (covers every currently selected song)
     if (showDeleteDialog) {
-        songToDelete?.let { song ->
-            AlertDialog(
-                onDismissRequest = { showDeleteDialog = false; songToDelete = null },
-                title = { Text("Delete song?") },
-                text = { Text("\"${song.title}\" will be permanently deleted from your device.") },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            viewModel.deleteSong(song)
-                            showDeleteDialog = false
-                            songToDelete = null
-                        },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = MaterialTheme.colorScheme.error
-                        )
-                    ) { Text("Delete") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDeleteDialog = false; songToDelete = null }) { Text("Cancel") }
-                }
-            )
-        }
+        val toDelete = songs.filter { it.id in selectedIds }
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text(if (toDelete.size == 1) "Delete song?" else "Delete ${toDelete.size} songs?") },
+            text = {
+                Text(
+                    if (toDelete.size == 1) {
+                        "\"${toDelete.first().title}\" will be permanently deleted from your device."
+                    } else {
+                        "These ${toDelete.size} songs will be permanently deleted from your device."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteSongs(toDelete)
+                        showDeleteDialog = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }
