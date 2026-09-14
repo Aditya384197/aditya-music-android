@@ -1,7 +1,6 @@
 package com.aditya.music.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,10 +16,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.ExperimentalFoundationApi
 import com.aditya.music.data.model.Song
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MiniPlayer(
     song: Song,
@@ -65,9 +62,11 @@ fun MiniPlayer(
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .basicMarquee()
+                    modifier = Modifier.fillMaxWidth()
+                    // basicMarquee() removed: this bar stays on screen on every tab, so its
+                    // continuous scrolling animation was running non-stop in the background and
+                    // competing for frame time with list scrolling elsewhere (e.g. the Songs tab),
+                    // which is what made scrolling feel laggy/stuttery.
                 )
                 Text(
                     text = song.artist,
