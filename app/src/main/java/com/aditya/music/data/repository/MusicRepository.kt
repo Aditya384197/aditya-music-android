@@ -147,16 +147,38 @@ class MusicRepository(
     fun getSongsForPlaylist(playlistId: Long): Flow<List<Long>> = playlistDao.getSongIdsForPlaylist(playlistId)
 
     /**
-     * Deletes a song file from the device via MediaStore.
-     * Returns true if deletion was successful.
+     * Result of a delete attempt. On Android 10+, deleting a MediaStore item that this app didn't
+     * create requires the user to confirm a system dialog first - that dialog can't be shown from
+     * here, so [NeedsPermission] hands the caller an IntentSender to launch for that confirmation.
      */
-    suspend fun deleteSong(song: com.aditya.music.data.model.Song): Boolean = withContext(Dispatchers.IO) {
+    sealed class DeleteResult {
+        object Success : DeleteResult()
+        data class NeedsPermission(val intentSender: android.content.IntentSender) : DeleteResult()
+        object Failure : DeleteResult()
+    }
+
+    /**
+     * Deletes a song file from the device via MediaStore.
+     */
+    suspend fun deleteSong(song: Song): DeleteResult = withContext(Dispatchers.IO) {
         try {
             val rows = contentResolver.delete(song.contentUri, null, null)
-            rows > 0
+            if (rows > 0) DeleteResult.Success else DeleteResult.Failure
+        } catch (securityException: SecurityException) {
+            val intentSender = when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                    MediaStore.createDeleteRequest(contentResolver, listOf(song.contentUri)).intentSender
+                }
+                Build.VERSION.SDK_INT == Build.VERSION_CODES.Q &&
+                    securityException is android.app.RecoverableSecurityException -> {
+                    securityException.userAction.actionIntent.intentSender
+                }
+                else -> null
+            }
+            if (intentSender != null) DeleteResult.NeedsPermission(intentSender) else DeleteResult.Failure
         } catch (e: Exception) {
             e.printStackTrace()
-            false
+            DeleteResult.Failure
         }
     }
 }
