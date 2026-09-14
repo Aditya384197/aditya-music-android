@@ -1,6 +1,7 @@
 package com.aditya.music.ui.viewmodel
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -31,13 +32,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var mediaController: MediaController? = null
     private var tickerJob: Job? = null
 
-    /**
-     * Resolves the Song backing the player's current MediaItem.
-     * After the OS recreates the service (or while the library is still being scanned
-     * after a cold start), allSongs can be empty even though the player has the
-     * restored queue loaded. We fall back to a lightweight Song built from the
-     * MediaItem's persisted metadata so Now Playing works instantly.
-     */
     private fun songFromMediaItem(mediaItem: MediaItem?): Song? {
         if (mediaItem == null) return null
         val id = mediaItem.mediaId.toLongOrNull() ?: return null
@@ -48,12 +42,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             title = md.title?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Title",
             artist = md.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Artist",
             album = md.albumTitle?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Album",
-            albumId = -1L,
-            duration = 0L,
+            albumId = -1L, duration = 0L,
             contentUri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY,
-            albumArtUri = md.artworkUri,
-            dateAdded = 0L,
-            size = 0L
+            albumArtUri = md.artworkUri, dateAdded = 0L, size = 0L
         )
     }
 
@@ -79,24 +70,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val filteredSongs: StateFlow<List<Song>> = combine(
-        allSongs,
-        searchQuery,
-        repository.songIdsByPlayCount
+        allSongs, searchQuery, repository.songIdsByPlayCount
     ) { songs, query, playOrder ->
-        // Rank map: songs earlier in playOrder get a higher rank (more plays).
         val rankMap = playOrder.withIndex().associate { (index, songId) ->
             songId to playOrder.size - index
         }
-        val base = if (query.isBlank()) {
-            songs
-        } else {
-            songs.filter {
-                it.title.contains(query, ignoreCase = true) ||
-                    it.artist.contains(query, ignoreCase = true) ||
-                    it.album.contains(query, ignoreCase = true)
-            }
+        val base = if (query.isBlank()) songs
+        else songs.filter {
+            it.title.contains(query, ignoreCase = true) ||
+                it.artist.contains(query, ignoreCase = true) ||
+                it.album.contains(query, ignoreCase = true)
         }
-        // Smart sorting: most-played songs first, then alphabetical for ties/unplayed.
         base.sortedWith(
             compareByDescending<Song> { rankMap[it.id] ?: 0 }
                 .thenBy { it.title.lowercase() }
@@ -288,9 +272,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (controller.isPlaying) {
                 controller.pause()
             } else {
-                if (controller.playbackState == Player.STATE_IDLE) {
-                    controller.prepare()
-                }
+                if (controller.playbackState == Player.STATE_IDLE) controller.prepare()
                 controller.play()
             }
         }
@@ -368,5 +350,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (i != keepIndex) controller.removeMediaItem(i)
         }
         syncQueueFromController()
+    }
+    fun shareSong(song: Song, context: android.content.Context) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "audio/*"
+            putExtra(Intent.EXTRA_STREAM, song.contentUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Share \"${song.title}\""))
+    }
+
+    fun deleteSong(song: Song) {
+        viewModelScope.launch {
+            val success = repository.deleteSong(song)
+            if (success) {
+                allSongs.update { songs -> songs.filterNot { it.id == song.id } }
+            }
+        }
     }
 }
