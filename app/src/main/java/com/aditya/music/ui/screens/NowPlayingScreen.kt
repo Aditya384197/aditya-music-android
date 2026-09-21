@@ -4,6 +4,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -16,12 +19,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import com.aditya.music.media.player.PRESET_CLASSICAL
 import com.aditya.music.media.player.PRESET_CUSTOM
 import com.aditya.music.media.player.PRESET_DANCE
@@ -29,7 +30,7 @@ import com.aditya.music.media.player.PRESET_FLAT
 import com.aditya.music.media.player.PRESET_POP
 import com.aditya.music.media.player.PRESET_ROCK
 import com.aditya.music.media.player.PRESET_VOCAL
-import com.aditya.music.ui.components.AdityaLogo
+import com.aditya.music.ui.components.ArtworkView
 import com.aditya.music.ui.viewmodel.MusicViewModel
 import kotlin.math.roundToInt
 
@@ -135,26 +136,17 @@ fun NowPlayingScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceEvenly
             ) {
-                Box(
+                ArtworkView(
+                    artworkUri = song.albumArtUri,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp)
-                        .clip(RoundedCornerShape(28.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (song.albumArtUri != null) {
-                        AsyncImage(
-                            model = song.albumArtUri,
-                            contentDescription = "Album artwork",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        AdityaLogo(size = 150.dp)
-                    }
-                }
+                        .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp),
+                    logoSize = 150.dp,
+                    imageSizePx = 720,
+                    contentDescription = "Album artwork",
+                    shape = RoundedCornerShape(28.dp)
+                )
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
@@ -213,11 +205,7 @@ fun NowPlayingScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(formatDuration(shownPositionMs), style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            text = "-${formatDuration((duration - shownPositionMs).coerceAtLeast(0L))}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Spacer(Modifier.weight(1f))
                         Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium)
                     }
                 }
@@ -411,42 +399,31 @@ private fun EqualizerBottomSheet(
             ToneSlider("Treble", state.trebleDb, supported) { viewModel.setEqualizerTrebleDb(it) }
 
             if (state.bandLevelsMb.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 Text("Fine bands", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                 Text(
-                    "Use only when you need precise tuning. 0 dB keeps that band unchanged.",
+                    "Vertical controls for precise frequency tuning. 0 dB leaves that band unchanged.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(9.dp))
 
-                state.bandLevelsMb.forEachIndexed { index, level ->
-                    val frequency = state.bandFrequenciesHz.getOrNull(index) ?: 0
-                    val min = state.bandLevelMinMb.toFloat()
-                    val max = state.bandLevelMaxMb.toFloat()
-                    val span = (max - min).coerceAtLeast(1f)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            formatFrequency(frequency),
-                            modifier = Modifier.width(56.dp),
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        Slider(
-                            value = ((level.toFloat() - min) / span).coerceIn(0f, 1f),
-                            onValueChange = {
-                                viewModel.setEqualizerBand(index, (min + it * span).roundToInt())
-                            },
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    state.bandLevelsMb.forEachIndexed { index, level ->
+                        val frequency = state.bandFrequenciesHz.getOrNull(index) ?: 0
+                        VerticalBandSlider(
+                            frequency = formatFrequency(frequency),
+                            valueMb = level.toInt(),
+                            minMb = state.bandLevelMinMb.toInt(),
+                            maxMb = state.bandLevelMaxMb.toInt(),
                             enabled = supported,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            formatGain(level),
-                            modifier = Modifier.width(54.dp),
-                            textAlign = TextAlign.End,
-                            style = MaterialTheme.typography.labelSmall
+                            onValueChange = { viewModel.setEqualizerBand(index, it) }
                         )
                     }
                 }
@@ -463,6 +440,89 @@ private fun EqualizerBottomSheet(
                 Text("Reset to pure sound")
             }
         }
+    }
+}
+
+@Composable
+private fun VerticalBandSlider(
+    frequency: String,
+    valueMb: Int,
+    minMb: Int,
+    maxMb: Int,
+    enabled: Boolean,
+    onValueChange: (Int) -> Unit
+) {
+    val trackHeight = 178.dp
+    val thumbSize = 22.dp
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val dragHeightPx = with(density) { (trackHeight - thumbSize).toPx().coerceAtLeast(1f) }
+    val span = (maxMb - minMb).coerceAtLeast(1).toFloat()
+    var dragValue by remember(valueMb) { mutableFloatStateOf(valueMb.toFloat()) }
+    val normalized = ((dragValue - minMb) / span).coerceIn(0f, 1f)
+    val thumbOffset = (trackHeight - thumbSize) * (1f - normalized)
+    val zeroNormalized = ((0 - minMb) / span).coerceIn(0f, 1f)
+    val zeroOffset = (trackHeight - 2.dp) * (1f - zeroNormalized)
+
+    Column(
+        modifier = Modifier.width(64.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            frequency,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(7.dp))
+
+        Box(
+            modifier = Modifier
+                .width(48.dp)
+                .height(trackHeight)
+                .draggable(
+                    enabled = enabled,
+                    orientation = Orientation.Vertical,
+                    state = rememberDraggableState { delta ->
+                        val next = (dragValue - (delta / dragHeightPx) * span)
+                            .coerceIn(minMb.toFloat(), maxMb.toFloat())
+                        dragValue = next
+                        onValueChange(next.roundToInt())
+                    }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                Modifier
+                    .width(5.dp)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+            Box(
+                Modifier
+                    .width(18.dp)
+                    .height(2.dp)
+                    .offset(y = zeroOffset)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.outlineVariant)
+            )
+            Surface(
+                modifier = Modifier
+                    .size(thumbSize)
+                    .offset(y = thumbOffset),
+                shape = CircleShape,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                shadowElevation = if (enabled) 2.dp else 0.dp
+            ) {}
+        }
+
+        Spacer(Modifier.height(7.dp))
+        Text(
+            formatGain(valueMb.toShort()),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (valueMb == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 

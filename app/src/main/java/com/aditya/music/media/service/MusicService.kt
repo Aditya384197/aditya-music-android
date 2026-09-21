@@ -1,51 +1,35 @@
 package com.aditya.music.media.service
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.net.Uri
-import android.view.KeyEvent
-import org.json.JSONArray
-import org.json.JSONObject
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaStyleNotificationHelper
 import com.aditya.music.MainActivity
 import com.aditya.music.R
 import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerManager
-import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Long-lived playback service for Aditya Music.
  *
- * Responsibilities:
- * - Keep the ExoPlayer/MediaSession independent of the Activity lifecycle.
- * - Keep the media notification + foreground service alive for up to 60 minutes after pause.
- * - Remove the notification after the one-hour paused grace period.
- * - Provide previous / play-pause / next controls through the MediaSession.
- * - Keep elapsed/total duration readable without waking the UI every second.
+ * The service intentionally delegates notification rendering to Media3's native provider. This
+ * keeps the Android media controls and the MediaSession in one source of truth, including the
+ * position/duration state used by supported System UI seek controls.
  */
 @UnstableApi
 class MusicService : MediaLibraryService() {
 
     companion object {
-        private const val NOTIFICATION_CHANNEL_ID = "aditya_music_playback"
-        private const val NOTIFICATION_CHANNEL_NAME = "Music playback"
-        private const val NOTIFICATION_ID = 1001
-        private const val PAUSED_NOTIFICATION_TIMEOUT_MS = 60L * 60L * 1000L
         private const val PLAYBACK_STATE_PREFS = "aditya_music_playback_state"
         private const val KEY_QUEUE = "queue"
         private const val KEY_INDEX = "index"
@@ -56,20 +40,6 @@ class MusicService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private var equalizerManager: EqualizerManager? = null
     private var restoringState = false
-
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private val notificationManager by lazy {
-        getSystemService(NotificationManager::class.java)
-    }
-
-    private val removePausedNotification = Runnable {
-        val currentPlayer = player ?: return@Runnable
-        if (!currentPlayer.isPlaying) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager?.cancel(NOTIFICATION_ID)
-            stopSelf()
-        }
-    }
 
     private val playerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
@@ -84,7 +54,11 @@ class MusicService : MediaLibraryService() {
             persistPlaybackState()
         }
 
-        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
             persistPlaybackState()
         }
 
@@ -95,7 +69,6 @@ class MusicService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
 
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -110,6 +83,8 @@ class MusicService : MediaLibraryService() {
             .setSeekForwardIncrementMs(10_000L)
             .build()
             .also {
+                // Preserve source timing and dynamics. No silence skipping or extra player-side
+                // processing is enabled here; EQ is applied only when the user turns it on.
                 it.setSkipSilenceEnabled(false)
                 it.setPauseAtEndOfMediaItems(false)
                 it.addListener(playerListener)
@@ -117,151 +92,38 @@ class MusicService : MediaLibraryService() {
 
         player = exoPlayer
         restorePlaybackState(exoPlayer)
-        if (exoPlayer.audioSessionId > 0) {
-            rebuildEqualizer(exoPlayer.audioSessionId)
-        }
+        if (exoPlayer.audioSessionId > 0) rebuildEqualizer(exoPlayer.audioSessionId)
 
         val activityIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
+        val sessionActivity = PendingIntent.getActivity(
             this,
             0,
             activityIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // Media3 owns the media notification so the session's playback state/commands remain
+        // synchronized with the notification and System UI. Android 13+ specifically populates
+        // its media control from MediaSession data.
+        DefaultMediaNotificationProvider(this).also { provider ->
+            provider.setSmallIcon(R.drawable.ic_notification_aditya)
+            setMediaNotificationProvider(provider)
+        }
+
         mediaSession = MediaLibrarySession.Builder(
             this,
             exoPlayer,
             object : MediaLibrarySession.Callback {}
         )
-            .setSessionActivity(pendingIntent)
+            .setSessionActivity(sessionActivity)
             .build()
     }
 
-    /**
-     * Media3 1.3.1's built-in paused foreground grace period is limited to its internal default.
-     * We therefore own the notification/foreground transition and deliberately keep it active for
-     * one hour after a pause, while still using Media3's MediaStyle so System UI can expose the
-     * same media session controls.
-     */
-    override fun onUpdateNotification(
-        session: MediaSession,
-        startInForegroundRequired: Boolean
-    ) {
-        val currentPlayer = session.player
-
-        // While playing, use Media3's native MediaStyle notification. Android 10+ can then
-        // expose the MediaSession seek bar and route drag gestures to the player's seekTo().
-        if (currentPlayer.isPlaying) {
-            mainHandler.removeCallbacks(removePausedNotification)
-            super.onUpdateNotification(session, startInForegroundRequired)
-            return
-        }
-        if (currentPlayer.mediaItemCount == 0) {
-            mainHandler.removeCallbacks(removePausedNotification)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager?.cancel(NOTIFICATION_ID)
-            return
-        }
-
-        val metadata = currentPlayer.mediaMetadata
-        val title = metadata.title?.toString()?.takeIf { it.isNotBlank() } ?: "Aditya Music"
-        val artist = metadata.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown artist"
-        val album = metadata.albumTitle?.toString()?.takeIf { it.isNotBlank() }
-        val duration = currentPlayer.duration.takeIf { it >= 0L } ?: 0L
-        val position = currentPlayer.currentPosition.coerceAtLeast(0L)
-
-        val playPauseIntent = mediaActionPendingIntent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-        val previousIntent = mediaActionPendingIntent(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-        val nextIntent = mediaActionPendingIntent(KeyEvent.KEYCODE_MEDIA_NEXT)
-
-        val notificationBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_aditya)
-            .setContentTitle(title)
-            .setContentText(artist)
-            .setSubText(buildProgressText(position, duration, album))
-            .setContentIntent(session.getSessionActivity())
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setOnlyAlertOnce(true)
-            .setOngoing(currentPlayer.isPlaying)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setShowWhen(false)
-            .addAction(
-                NotificationCompat.Action(
-                    android.R.drawable.ic_media_previous,
-                    "Previous",
-                    previousIntent
-                )
-            )
-            .addAction(
-                NotificationCompat.Action(
-                    if (currentPlayer.isPlaying) android.R.drawable.ic_media_pause
-                    else android.R.drawable.ic_media_play,
-                    if (currentPlayer.isPlaying) "Pause" else "Play",
-                    playPauseIntent
-                )
-            )
-            .addAction(
-                NotificationCompat.Action(
-                    android.R.drawable.ic_media_next,
-                    "Next",
-                    nextIntent
-                )
-            )
-            .setStyle(
-                MediaStyleNotificationHelper.MediaStyle(session)
-                    .setShowActionsInCompactView(0, 1, 2)
-            )
-
-        if (duration > 0L) {
-            notificationBuilder.setProgress(
-                1000,
-                ((position.coerceAtMost(duration).toDouble() / duration.toDouble()) * 1000.0)
-                    .toInt()
-                    .coerceIn(0, 1000),
-                false
-            )
-            notificationBuilder.setWhen(System.currentTimeMillis() - position)
-            notificationBuilder.setUsesChronometer(currentPlayer.isPlaying)
-        }
-
-        val notification: Notification = notificationBuilder.build()
-
-        mainHandler.removeCallbacks(removePausedNotification)
-        if (currentPlayer.isPlaying) {
-            // Active playback stays in a foreground service for reliable long-running music.
-            runCatching { startForeground(NOTIFICATION_ID, notification) }
-        } else {
-            if (startInForegroundRequired) {
-                // Android requires startForeground() to be called at least once when the service
-                // was started via startForegroundService() (e.g. a media-button "play" that had to
-                // cold-start us). Satisfy that contract, then immediately detach below so the
-                // notification stops being a pinned foreground notification.
-                runCatching { startForeground(NOTIFICATION_ID, notification) }
-            }
-            notificationManager?.notify(NOTIFICATION_ID, notification)
-            // A paused player does not need a non-dismissible foreground notification. Detach it so
-            // Android treats it as a normal notification that the user can swipe away if they want.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(false)
-            }
-            mainHandler.postDelayed(removePausedNotification, PAUSED_NOTIFICATION_TIMEOUT_MS)
-        }
-    }
-
-    /**
-     * Saves the complete queue and current position. This is intentionally independent of the
-     * Activity/ViewModel so a paused Media3 service can be recreated by Android without losing
-     * the loaded song. Local content URIs and display metadata are enough to rebuild the queue.
-     */
     private fun persistPlaybackState() {
         if (restoringState) return
         val currentPlayer = player ?: return
         if (currentPlayer.mediaItemCount == 0) return
+
         runCatching {
             val queue = JSONArray()
             for (i in 0 until currentPlayer.mediaItemCount) {
@@ -274,6 +136,7 @@ class MusicService : MediaLibraryService() {
                     put("artist", metadata.artist?.toString() ?: "")
                     put("album", metadata.albumTitle?.toString() ?: "")
                     put("art", metadata.artworkUri?.toString() ?: "")
+                    put("duration", metadata.durationMs ?: 0L)
                 })
             }
             getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE).edit()
@@ -287,13 +150,16 @@ class MusicService : MediaLibraryService() {
     private fun restorePlaybackState(targetPlayer: ExoPlayer) {
         val prefs = getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE)
         val rawQueue = prefs.getString(KEY_QUEUE, null) ?: return
+
         runCatching {
             val array = JSONArray(rawQueue)
             val items = ArrayList<androidx.media3.common.MediaItem>(array.length())
+
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
                 val uri = obj.optString("uri")
                 if (uri.isBlank()) continue
+
                 items += androidx.media3.common.MediaItem.Builder()
                     .setMediaId(obj.optString("id"))
                     .setUri(uri)
@@ -302,23 +168,26 @@ class MusicService : MediaLibraryService() {
                             .setTitle(obj.optString("title"))
                             .setArtist(obj.optString("artist"))
                             .setAlbumTitle(obj.optString("album"))
+                            .setDurationMs(
+                                obj.optLong("duration", 0L).takeIf { it > 0L }
+                            )
                             .apply {
-                                obj.optString("art").takeIf { it.isNotBlank() }?.let { setArtworkUri(Uri.parse(it)) }
+                                obj.optString("art")
+                                    .takeIf { it.isNotBlank() }
+                                    ?.let { setArtworkUri(Uri.parse(it)) }
                             }
                             .build()
                     )
                     .build()
             }
+
             if (items.isNotEmpty()) {
                 val index = prefs.getInt(KEY_INDEX, 0).coerceIn(items.indices)
                 val position = prefs.getLong(KEY_POSITION, 0L).coerceAtLeast(0L)
                 restoringState = true
                 try {
-                    // No explicit pause() here: ExoPlayer already defaults to playWhenReady = false,
-                    // so restoring never auto-plays on its own. Calling pause() used to race with an
-                    // incoming notification/lock-screen "play" tap that cold-starts this very service
-                    // (after Android kills it) — whichever command reached the player last would win,
-                    // so the tap that woke the service up could get silently overridden back to paused.
+                    // Restoring must never auto-play. A later system play command is then free to
+                    // start the player without being raced by a restore-time pause().
                     targetPlayer.setMediaItems(items, index, position)
                     targetPlayer.prepare()
                 } finally {
@@ -327,60 +196,6 @@ class MusicService : MediaLibraryService() {
             }
         }.onFailure {
             restoringState = false
-        }
-    }
-
-    private fun mediaActionPendingIntent(keyCode: Int): PendingIntent {
-        val intent = Intent(this, MusicService::class.java).apply {
-            action = Intent.ACTION_MEDIA_BUTTON
-            putExtra(
-                Intent.EXTRA_KEY_EVENT,
-                KeyEvent(KeyEvent.ACTION_DOWN, keyCode)
-            )
-        }
-        return PendingIntent.getService(
-            this,
-            keyCode,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-    }
-
-    private fun buildProgressText(position: Long, duration: Long, album: String?): String {
-        val timing = if (duration > 0L) {
-            "${formatDuration(position)} / ${formatDuration(duration)}"
-        } else {
-            formatDuration(position)
-        }
-        return if (!album.isNullOrBlank()) "$timing • $album" else timing
-    }
-
-    private fun formatDuration(ms: Long): String {
-        val totalSeconds = ms.coerceAtLeast(0L) / 1000L
-        val hours = totalSeconds / 3600L
-        val minutes = (totalSeconds % 3600L) / 60L
-        val seconds = totalSeconds % 60L
-        return if (hours > 0L) {
-            String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            String.format(Locale.US, "%d:%02d", minutes, seconds)
-        }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = notificationManager ?: return
-        if (manager.getNotificationChannel(NOTIFICATION_CHANNEL_ID) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    NOTIFICATION_CHANNEL_ID,
-                    NOTIFICATION_CHANNEL_NAME,
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = "Playback controls for Aditya Music"
-                    setShowBadge(false)
-                }
-            )
         }
     }
 
@@ -408,19 +223,17 @@ class MusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
-        mainHandler.removeCallbacks(removePausedNotification)
         EqualizerController.detach(equalizerManager)
         equalizerManager?.release()
         equalizerManager = null
 
         player?.removeListener(playerListener)
+        persistPlaybackState()
         mediaSession?.release()
         mediaSession = null
-        persistPlaybackState()
         player?.release()
         player = null
 
-        notificationManager?.cancel(NOTIFICATION_ID)
         super.onDestroy()
     }
 }

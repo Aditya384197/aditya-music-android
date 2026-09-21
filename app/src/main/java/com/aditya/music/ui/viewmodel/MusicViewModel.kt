@@ -45,7 +45,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             title = md.title?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Title",
             artist = md.artist?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Artist",
             album = md.albumTitle?.toString()?.takeIf { it.isNotBlank() } ?: "Unknown Album",
-            albumId = -1L, duration = 0L,
+            albumId = -1L, duration = md.durationMs ?: 0L,
             contentUri = mediaItem.localConfiguration?.uri ?: Uri.EMPTY,
             albumArtUri = md.artworkUri, dateAdded = 0L, size = 0L
         )
@@ -60,6 +60,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
                 .setArtworkUri(song.albumArtUri)
+                .setDurationMs(song.duration.takeIf { it > 0L })
                 .build()
         )
         .build()
@@ -224,7 +225,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 mediaController?.let { c ->
                     if (c.isPlaying) currentPosition.value = c.currentPosition.coerceAtLeast(0)
                 }
-                delay(250)
+                delay(500)
             }
         }
     }

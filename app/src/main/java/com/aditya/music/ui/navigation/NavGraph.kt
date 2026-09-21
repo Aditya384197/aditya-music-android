@@ -10,9 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.*
-import com.aditya.music.ui.components.MiniPlayer
+import com.aditya.music.ui.components.ConnectedMiniPlayer
 import com.aditya.music.ui.screens.*
 import com.aditya.music.ui.viewmodel.MusicViewModel
 
@@ -27,9 +26,6 @@ fun AdityaNavGraph(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val currentSong by viewModel.currentSong.collectAsState()
-    val isPlaying by viewModel.isPlaying.collectAsState()
-    val currentPosition by viewModel.currentPosition.collectAsState()
 
     LaunchedEffect(navController) {
         viewModel.openNowPlayingEvents.collect {
@@ -55,12 +51,23 @@ fun AdityaNavGraph(
                             label = { Text(item.label) },
                             selected = currentRoute == item.screen.route,
                             onClick = {
-                                navController.navigate(item.screen.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
+                                if (item.screen == Screen.Home) {
+                                    // Home is a true root destination: one tap from any nested page
+                                    // returns directly to the Home music area.
+                                    if (navController.currentDestination?.route != Screen.Home.route) {
+                                        val popped = navController.popBackStack(Screen.Home.route, false)
+                                        if (!popped && navController.currentDestination?.route != Screen.Home.route) {
+                                            navController.navigate(Screen.Home.route) {
+                                                launchSingleTop = true
+                                            }
+                                        }
                                     }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                } else {
+                                    navController.navigate(item.screen.route) {
+                                        popUpTo(Screen.Home.route) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
                                 }
                             }
                         )
@@ -120,21 +127,15 @@ fun AdityaNavGraph(
                 }
             }
 
-            // Floating MiniPlayer above bottom bar
-            if (currentSong != null && currentRoute != Screen.NowPlaying.route) {
-                Box(
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                ) {
-                    MiniPlayer(
-                        song = currentSong!!,
-                        isPlaying = isPlaying,
-                        positionMs = currentPosition,
-                        onPlayPause = { viewModel.togglePlayPause() },
-                        onNext = { viewModel.playNext() },
-                        onClick = { navController.navigate(Screen.NowPlaying.route) },
-                        onDismiss = { viewModel.dismissPlayer() }
-                    )
-                }
+            // Keep MiniPlayer's fast-changing playback state isolated from the NavHost.
+            // This prevents a position tick from recomposing the whole Home screen while scrolling.
+            Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+                ConnectedMiniPlayer(
+                    viewModel = viewModel,
+                    visible = currentRoute != Screen.NowPlaying.route,
+                    onClick = { navController.navigate(Screen.NowPlaying.route) { launchSingleTop = true } },
+                    onDismiss = viewModel::dismissPlayer
+                )
             }
         }
     }

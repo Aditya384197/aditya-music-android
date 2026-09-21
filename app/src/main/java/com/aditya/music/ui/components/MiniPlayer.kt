@@ -1,6 +1,5 @@
 package com.aditya.music.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -15,14 +14,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
 import com.aditya.music.data.model.Song
-import coil.compose.AsyncImage
+import com.aditya.music.ui.viewmodel.MusicViewModel
 import kotlin.math.roundToInt
 
 @Composable
@@ -35,6 +35,8 @@ fun MiniPlayer(
     onClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 88.dp.toPx() }
     var offsetY by remember(song.id) { mutableFloatStateOf(0f) }
 
     val dragState = rememberDraggableState { delta ->
@@ -44,17 +46,17 @@ fun MiniPlayer(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
             .offset { IntOffset(0, offsetY.roundToInt()) }
             .graphicsLayer {
-                alpha = (1f - (offsetY / 180f)).coerceIn(0.25f, 1f)
+                alpha = (1f - (offsetY / 180f)).coerceIn(0f, 1f)
             }
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(15.dp))
             .draggable(
                 state = dragState,
                 orientation = Orientation.Vertical,
                 onDragStopped = {
-                    if (offsetY >= 84f) {
+                    if (offsetY >= dismissThresholdPx) {
                         offsetY = 0f
                         onDismiss()
                     } else {
@@ -64,9 +66,9 @@ fun MiniPlayer(
             )
             .clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 6.dp
+        tonalElevation = 5.dp
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth()) {
             if (song.duration > 0L) {
                 LinearProgressIndicator(
                     progress = (positionMs.toFloat() / song.duration.toFloat()).coerceIn(0f, 1f),
@@ -75,29 +77,20 @@ fun MiniPlayer(
             }
             Row(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 10.dp, vertical = 7.dp)
                     .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (song.albumArtUri != null) {
-                        AsyncImage(
-                            model = song.albumArtUri,
-                            contentDescription = song.album,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        AdityaLogo(size = 28.dp)
-                    }
-                }
+                ArtworkView(
+                    artworkUri = song.albumArtUri,
+                    modifier = Modifier.size(44.dp),
+                    logoSize = 26.dp,
+                    imageSizePx = 144,
+                    contentDescription = song.title,
+                    shape = RoundedCornerShape(10.dp)
+                )
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -109,8 +102,8 @@ fun MiniPlayer(
                     )
                     Text(
                         text = song.artist,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -125,12 +118,35 @@ fun MiniPlayer(
                 }
 
                 IconButton(onClick = onNext) {
-                    Icon(
-                        imageVector = Icons.Rounded.SkipNext,
-                        contentDescription = "Next Track"
-                    )
+                    Icon(Icons.Rounded.SkipNext, "Next Track")
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ConnectedMiniPlayer(
+    viewModel: MusicViewModel,
+    visible: Boolean,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (!visible) return
+
+    val song by viewModel.currentSong.collectAsState()
+    val isPlaying by viewModel.isPlaying.collectAsState()
+    val positionMs by viewModel.currentPosition.collectAsState()
+
+    song?.let {
+        MiniPlayer(
+            song = it,
+            isPlaying = isPlaying,
+            positionMs = positionMs,
+            onPlayPause = viewModel::togglePlayPause,
+            onNext = viewModel::playNext,
+            onClick = onClick,
+            onDismiss = onDismiss
+        )
     }
 }
