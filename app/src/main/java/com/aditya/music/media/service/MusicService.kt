@@ -105,8 +105,15 @@ class MusicService : MediaLibraryService() {
         val exoPlayer = ExoPlayer.Builder(this)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_LOCAL)
+            .setSeekBackIncrementMs(10_000L)
+            .setSeekForwardIncrementMs(10_000L)
             .build()
-            .also { it.addListener(playerListener) }
+            .also {
+                it.setSkipSilenceEnabled(false)
+                it.setPauseAtEndOfMediaItems(false)
+                it.addListener(playerListener)
+            }
 
         player = exoPlayer
         restorePlaybackState(exoPlayer)

@@ -29,6 +29,7 @@ fun AdityaNavGraph(
 
     val currentSong by viewModel.currentSong.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val currentPosition by viewModel.currentPosition.collectAsState()
 
     LaunchedEffect(navController) {
         viewModel.openNowPlayingEvents.collect {
@@ -127,6 +128,7 @@ fun AdityaNavGraph(
                     MiniPlayer(
                         song = currentSong!!,
                         isPlaying = isPlaying,
+                        positionMs = currentPosition,
                         onPlayPause = { viewModel.togglePlayPause() },
                         onNext = { viewModel.playNext() },
                         onClick = { navController.navigate(Screen.NowPlaying.route) },

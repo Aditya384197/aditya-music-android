@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -15,11 +16,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.aditya.music.media.player.PRESET_CLASSICAL
 import com.aditya.music.media.player.PRESET_CUSTOM
 import com.aditya.music.media.player.PRESET_DANCE
@@ -27,12 +29,9 @@ import com.aditya.music.media.player.PRESET_FLAT
 import com.aditya.music.media.player.PRESET_POP
 import com.aditya.music.media.player.PRESET_ROCK
 import com.aditya.music.media.player.PRESET_VOCAL
-import com.aditya.music.media.player.ROOM_NONE
-import com.aditya.music.media.player.ROOM_SMALL
-import com.aditya.music.media.player.ROOM_MEDIUM
-import com.aditya.music.media.player.ROOM_LARGE
 import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.viewmodel.MusicViewModel
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -47,10 +46,13 @@ fun NowPlayingScreen(
     val isShuffle by viewModel.isShuffle.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
     val equalizerState by viewModel.equalizerState.collectAsState()
+    val sleepRemainingMs by viewModel.sleepTimerRemainingMs.collectAsState()
     val favoriteSongs by viewModel.favoriteSongs.collectAsState()
     val isCurrentFavorite = currentSong?.id?.let { id -> favoriteSongs.any { it.id == id } } == true
+
     var showEqualizer by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    var showSleepDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -64,7 +66,7 @@ fun NowPlayingScreen(
                 actions = {
                     IconButton(onClick = { showEqualizer = true }) {
                         Icon(
-                            Icons.Rounded.Tune,
+                            Icons.Rounded.Equalizer,
                             contentDescription = "Equalizer",
                             tint = MaterialTheme.colorScheme.primary
                         )
@@ -79,22 +81,45 @@ fun NowPlayingScreen(
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Playing queue") },
-                                leadingIcon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
+                                leadingIcon = { Icon(Icons.Rounded.QueueMusic, null) },
                                 onClick = {
                                     showMoreMenu = false
                                     onOpenQueue()
                                 }
                             )
                             DropdownMenuItem(
-                                text = {
-                                    Text(if (isCurrentFavorite) "Remove favorite" else "Add to favorites")
+                                text = { Text(if (isCurrentFavorite) "Remove favorite" else "Add to favorites") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isCurrentFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        null
+                                    )
                                 },
-                                leadingIcon = { Icon(Icons.Rounded.FavoriteBorder, contentDescription = null) },
                                 onClick = {
                                     currentSong?.id?.let(viewModel::toggleFavorite)
                                     showMoreMenu = false
                                 }
                             )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(if (sleepRemainingMs > 0L) "Change sleep timer" else "Sleep timer")
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.Bedtime, null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    showSleepDialog = true
+                                }
+                            )
+                            if (sleepRemainingMs > 0L) {
+                                DropdownMenuItem(
+                                    text = { Text("Cancel sleep timer") },
+                                    leadingIcon = { Icon(Icons.Rounded.TimerOff, null) },
+                                    onClick = {
+                                        viewModel.cancelSleepTimer()
+                                        showMoreMenu = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -106,19 +131,29 @@ fun NowPlayingScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(horizontal = 24.dp),
+                    .padding(horizontal = 22.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceEvenly
             ) {
                 Box(
                     modifier = Modifier
-                        .size(280.dp)
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp)
                         .clip(RoundedCornerShape(28.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    AdityaLogo(size = 140.dp)
-
+                    if (song.albumArtUri != null) {
+                        AsyncImage(
+                            model = song.albumArtUri,
+                            contentDescription = "Album artwork",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        AdityaLogo(size = 150.dp)
+                    }
                 }
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -131,7 +166,7 @@ fun NowPlayingScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.fillMaxWidth().basicMarquee()
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(Modifier.height(5.dp))
                     Text(
                         text = song.artist,
                         style = MaterialTheme.typography.titleMedium,
@@ -144,7 +179,7 @@ fun NowPlayingScreen(
                     Text(
                         text = song.album,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -152,29 +187,76 @@ fun NowPlayingScreen(
                 }
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    var draggingProgress by remember { mutableStateOf<Float?>(null) }
-                    val actualProgress = if (song.duration > 0) {
-                        currentPosition.toFloat() / song.duration
+                    var draggingProgress by remember(song.id) { mutableStateOf<Float?>(null) }
+                    val duration = song.duration.coerceAtLeast(0L)
+                    val actualProgress = if (duration > 0L) {
+                        (currentPosition.toFloat() / duration).coerceIn(0f, 1f)
                     } else 0f
                     val shownProgress = draggingProgress ?: actualProgress
-                    val shownPositionMs = draggingProgress?.let {
-                        (it * song.duration).toLong()
-                    } ?: currentPosition
+                    val shownPositionMs = if (draggingProgress != null) {
+                        (draggingProgress!! * duration).toLong()
+                    } else {
+                        currentPosition
+                    }
 
                     Slider(
-                        value = shownProgress.coerceIn(0f, 1f),
+                        value = shownProgress,
                         onValueChange = { draggingProgress = it },
                         onValueChangeFinished = {
-                            draggingProgress?.let { viewModel.seekTo((it * song.duration).toLong()) }
+                            draggingProgress?.let { viewModel.seekTo((it * duration).toLong()) }
                             draggingProgress = null
-                        }
+                        },
+                        enabled = duration > 0L
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(formatDuration(shownPositionMs), style = MaterialTheme.typography.bodySmall)
-                        Text(song.formattedDuration, style = MaterialTheme.typography.bodySmall)
+                        Text(formatDuration(shownPositionMs), style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            text = "-${formatDuration((duration - shownPositionMs).coerceAtLeast(0L))}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+
+                if (sleepRemainingMs > 0L) {
+                    AssistChip(
+                        onClick = { showSleepDialog = true },
+                        label = { Text("Sleep ${formatTimer(sleepRemainingMs)}") },
+                        leadingIcon = { Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp)) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = { viewModel.seekBy(-10_000L) }) {
+                        Icon(Icons.Rounded.Replay10, "Back 10 seconds", Modifier.size(30.dp))
+                    }
+                    IconButton(onClick = { viewModel.playPrevious() }) {
+                        Icon(Icons.Rounded.SkipPrevious, "Previous", Modifier.size(34.dp))
+                    }
+                    FilledIconButton(
+                        onClick = { viewModel.togglePlayPause() },
+                        modifier = Modifier.size(68.dp),
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                    IconButton(onClick = { viewModel.playNext() }) {
+                        Icon(Icons.Rounded.SkipNext, "Next", Modifier.size(34.dp))
+                    }
+                    IconButton(onClick = { viewModel.seekBy(10_000L) }) {
+                        Icon(Icons.Rounded.Forward10, "Forward 10 seconds", Modifier.size(30.dp))
                     }
                 }
 
@@ -186,51 +268,58 @@ fun NowPlayingScreen(
                     IconButton(onClick = { viewModel.toggleShuffle() }) {
                         Icon(
                             Icons.Rounded.Shuffle,
-                            contentDescription = "Shuffle",
-                            tint = if (isShuffle) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            "Shuffle",
+                            tint = if (isShuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    IconButton(onClick = { viewModel.playPrevious() }) {
-                        Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous", modifier = Modifier.size(36.dp))
-                    }
-                    FilledIconButton(
-                        onClick = { viewModel.togglePlayPause() },
-                        modifier = Modifier.size(64.dp),
-                        shape = CircleShape
-                    ) {
+                    IconButton(onClick = { currentSong?.id?.let(viewModel::toggleFavorite) }) {
                         Icon(
-                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            modifier = Modifier.size(32.dp)
+                            if (isCurrentFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            "Favorite",
+                            tint = if (isCurrentFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-                    IconButton(onClick = { viewModel.playNext() }) {
-                        Icon(Icons.Rounded.SkipNext, contentDescription = "Next", modifier = Modifier.size(36.dp))
                     }
                     IconButton(onClick = { viewModel.toggleRepeat() }) {
                         Icon(
-                            Icons.Rounded.Repeat,
-                            contentDescription = "Repeat",
-                            tint = if (repeatMode != "off") MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            when (repeatMode) {
+                                "one" -> Icons.Rounded.RepeatOne
+                                else -> Icons.Rounded.Repeat
+                            },
+                            "Repeat",
+                            tint = if (repeatMode != "off") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    IconButton(onClick = onOpenQueue) {
+                        Icon(Icons.Rounded.QueueMusic, "Queue")
                     }
                 }
             }
-        } ?: run {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No song loaded")
-            }
+        } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No song loaded")
         }
+    }
 
-        if (showEqualizer) {
-            EqualizerBottomSheet(
-                viewModel = viewModel,
-                supported = equalizerState.supported,
-                onDismiss = { showEqualizer = false }
-            )
-        }
+    if (showEqualizer) {
+        EqualizerBottomSheet(
+            viewModel = viewModel,
+            supported = equalizerState.supported,
+            onDismiss = { showEqualizer = false }
+        )
+    }
+
+    if (showSleepDialog) {
+        SleepTimerDialog(
+            remainingMs = sleepRemainingMs,
+            onSelectMinutes = {
+                viewModel.startSleepTimer(it)
+                showSleepDialog = false
+            },
+            onCancel = {
+                viewModel.cancelSleepTimer()
+                showSleepDialog = false
+            },
+            onDismiss = { showSleepDialog = false }
+        )
     }
 }
 
@@ -242,33 +331,26 @@ private fun EqualizerBottomSheet(
     onDismiss: () -> Unit
 ) {
     val state by viewModel.equalizerState.collectAsState()
-    val presets = listOf(
-        PRESET_FLAT,
-        PRESET_POP,
-        PRESET_ROCK,
-        PRESET_DANCE,
-        PRESET_CLASSICAL,
-        PRESET_VOCAL,
-        PRESET_CUSTOM
-    )
+    val presets = listOf(PRESET_FLAT, PRESET_POP, PRESET_ROCK, PRESET_DANCE, PRESET_CLASSICAL, PRESET_VOCAL)
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp)
+                .padding(bottom = 30.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text("Equalizer", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(
-                        if (supported) "Playback sound shaping"
-                        else "Not supported by this device/session",
+                        if (supported) "Pure sound bypass is the default"
+                        else "Equalizer is not available for this audio session",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -280,8 +362,32 @@ private fun EqualizerBottomSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = if (!state.enabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (state.enabled) Icons.Rounded.GraphicEq else Icons.Rounded.Audiotrack,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (state.enabled) "EQ is shaping the sound" else "Bypass: source audio is left unshaped",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text("Presets", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(7.dp))
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -290,92 +396,159 @@ private fun EqualizerBottomSheet(
                     FilterChip(
                         selected = state.preset == preset,
                         onClick = { viewModel.applyEqualizerPreset(preset) },
-                        enabled = supported && preset != PRESET_CUSTOM,
+                        enabled = supported,
                         label = { Text(preset) }
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-            Text("Bass", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Slider(
-                value = state.bassStrength / 1000f,
-                onValueChange = { viewModel.setEqualizerBass((it * 1000).toInt()) },
-                enabled = supported
-            )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("0", style = MaterialTheme.typography.labelSmall)
-                Text("${state.bassStrength / 10}%", style = MaterialTheme.typography.labelSmall)
-                Text("100%", style = MaterialTheme.typography.labelSmall)
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-            Text("Clarity", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Slider(value = state.clarityStrength / 1000f, onValueChange = { viewModel.setEqualizerClarity((it * 1000).toInt()) }, enabled = supported)
-            Text("Vocals and mid-range detail", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-            Spacer(modifier = Modifier.height(14.dp))
-            Text("Room", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(ROOM_NONE, ROOM_SMALL, ROOM_MEDIUM, ROOM_LARGE).forEach { room ->
-                    FilterChip(selected = state.room == room, onClick = { viewModel.setEqualizerRoom(room) }, enabled = supported, label = { Text(room) })
+                if (state.preset == PRESET_CUSTOM) {
+                    FilterChip(selected = true, onClick = {}, enabled = false, label = { Text(PRESET_CUSTOM) })
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
-            Text("Frequency bands", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text("Drag each vertical band up or down", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().height(270.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Spacer(Modifier.height(18.dp))
+            ToneSlider("Bass", state.bassDb, supported) { viewModel.setEqualizerBassDb(it) }
+            ToneSlider("Mid", state.midDb, supported) { viewModel.setEqualizerMidDb(it) }
+            ToneSlider("Treble", state.trebleDb, supported) { viewModel.setEqualizerTrebleDb(it) }
+
+            if (state.bandLevelsMb.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text("Fine bands", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    "Use only when you need precise tuning. 0 dB keeps that band unchanged.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+
                 state.bandLevelsMb.forEachIndexed { index, level ->
                     val frequency = state.bandFrequenciesHz.getOrNull(index) ?: 0
-                    val minMb = state.bandLevelMinMb.toFloat()
-                    val maxMb = state.bandLevelMaxMb.toFloat()
-                    val span = (maxMb - minMb).coerceAtLeast(1f)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(76.dp).fillMaxHeight()) {
-                        Text(formatGain(level), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                        Box(modifier = Modifier.weight(1f).width(72.dp), contentAlignment = Alignment.Center) {
-                            Slider(
-                                value = ((level.toFloat() - minMb) / span).coerceIn(0f, 1f),
-                                onValueChange = { viewModel.setEqualizerBand(index, (minMb + it * span).toInt()) },
-                                enabled = supported,
-                                modifier = Modifier.width(220.dp).rotate(-90f)
-                            )
-                        }
-                        Text(formatFrequency(frequency), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 1)
+                    val min = state.bandLevelMinMb.toFloat()
+                    val max = state.bandLevelMaxMb.toFloat()
+                    val span = (max - min).coerceAtLeast(1f)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            formatFrequency(frequency),
+                            modifier = Modifier.width(56.dp),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        Slider(
+                            value = ((level.toFloat() - min) / span).coerceIn(0f, 1f),
+                            onValueChange = {
+                                viewModel.setEqualizerBand(index, (min + it * span).roundToInt())
+                            },
+                            enabled = supported,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            formatGain(level),
+                            modifier = Modifier.width(54.dp),
+                            textAlign = TextAlign.End,
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
             }
 
-            Text(
-                "Tip: EQ can only shape the audio that is already in the file. It cannot create missing detail from a low-quality source.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = { viewModel.resetEqualizer() },
+                enabled = supported,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.RestartAlt, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Reset to pure sound")
+            }
         }
     }
 }
 
-
-private fun formatFrequency(hz: Int): String = when {
-    hz >= 1000 -> {
-        val khz = hz / 1000f
-        if (khz == khz.toInt().toFloat()) "${khz.toInt()} kHz" else "%.1f kHz".format(khz)
+@Composable
+private fun ToneSlider(
+    label: String,
+    valueDb: Float,
+    enabled: Boolean,
+    onChange: (Float) -> Unit
+) {
+    Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    Slider(
+        value = valueDb.coerceIn(-6f, 6f),
+        onValueChange = onChange,
+        valueRange = -6f..6f,
+        steps = 23,
+        enabled = enabled
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("-6 dB", style = MaterialTheme.typography.labelSmall)
+        Text("${formatDb(valueDb)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        Text("+6 dB", style = MaterialTheme.typography.labelSmall)
     }
-    hz > 0 -> "$hz Hz"
-    else -> "Band"
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun SleepTimerDialog(
+    remainingMs: Long,
+    onSelectMinutes: (Int) -> Unit,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sleep timer", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                if (remainingMs > 0L) {
+                    Text("Current: ${formatTimer(remainingMs)}", color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(4.dp))
+                }
+                listOf(15, 30, 45, 60, 90).forEach { minutes ->
+                    FilledTonalButton(
+                        onClick = { onSelectMinutes(minutes) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Stop after $minutes minutes")
+                    }
+                }
+                if (remainingMs > 0L) {
+                    TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+                        Text("Cancel timer")
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
+}
+
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = (ms.coerceAtLeast(0L) / 1000L)
+    return "%d:%02d".format(totalSeconds / 60L, totalSeconds % 60L)
+}
+
+private fun formatTimer(ms: Long): String {
+    val totalSeconds = (ms.coerceAtLeast(0L) / 1000L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) "%d:%02d:%02d".format(hours, minutes, seconds)
+    else "%02d:%02d".format(minutes, seconds)
 }
 
 private fun formatGain(mb: Short): String {
     val db = mb / 100f
-    return if (db > 0f) "+%.1f dB".format(db) else "%.1f dB".format(db)
+    return if (db > 0f) "+%.1f".format(db) else "%.1f".format(db)
 }
 
-private fun formatDuration(ms: Long): String {
-    val sec = (ms.coerceAtLeast(0L)) / 1000
-    return String.format("%d:%02d", sec / 60, sec % 60)
+private fun formatDb(db: Float): String =
+    if (db > 0.05f) "+%.1f dB".format(db) else if (db < -0.05f) "%.1f dB".format(db) else "0 dB"
+
+private fun formatFrequency(hz: Int): String = when {
+    hz >= 1000 && hz % 1000 == 0 -> "${hz / 1000} kHz"
+    hz >= 1000 -> "%.1f kHz".format(hz / 1000f)
+    hz > 0 -> "$hz Hz"
+    else -> "Band"
 }

@@ -22,12 +22,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.draw.clip
 import com.aditya.music.data.model.Song
+import coil.compose.AsyncImage
 import kotlin.math.roundToInt
 
 @Composable
 fun MiniPlayer(
     song: Song,
     isPlaying: Boolean,
+    positionMs: Long,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onClick: () -> Unit,
@@ -65,6 +67,12 @@ fun MiniPlayer(
         tonalElevation = 6.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
+            if (song.duration > 0L) {
+                LinearProgressIndicator(
+                    progress = (positionMs.toFloat() / song.duration.toFloat()).coerceIn(0f, 1f),
+                    modifier = Modifier.fillMaxWidth().height(2.dp)
+                )
+            }
             Row(
                 modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -78,7 +86,15 @@ fun MiniPlayer(
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    AdityaLogo(size = 28.dp)
+                    if (song.albumArtUri != null) {
+                        AsyncImage(
+                            model = song.albumArtUri,
+                            contentDescription = song.album,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        AdityaLogo(size = 28.dp)
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))

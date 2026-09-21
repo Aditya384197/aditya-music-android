@@ -31,6 +31,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private var mediaController: MediaController? = null
     private var tickerJob: Job? = null
+    private var sleepTimerJob: Job? = null
+    private val _sleepTimerRemainingMs = MutableStateFlow(0L)
+    val sleepTimerRemainingMs: StateFlow<Long> = _sleepTimerRemainingMs.asStateFlow()
 
     private fun songFromMediaItem(mediaItem: MediaItem?): Song? {
         if (mediaItem == null) return null
@@ -47,6 +50,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             albumArtUri = md.artworkUri, dateAdded = 0L, size = 0L
         )
     }
+
+    private fun mediaItemFor(song: Song): MediaItem = MediaItem.Builder()
+        .setMediaId(song.id.toString())
+        .setUri(song.contentUri)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(song.title)
+                .setArtist(song.artist)
+                .setAlbumTitle(song.album)
+                .setArtworkUri(song.albumArtUri)
+                .build()
+        )
+        .build()
 
     val isScanning = MutableStateFlow(false)
     val hasPermission = MutableStateFlow(false)
@@ -238,20 +254,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         currentPosition.value = 0L
 
         mediaController?.let { controller ->
-            val mediaItems = context.map { song ->
-                MediaItem.Builder()
-                    .setMediaId(song.id.toString())
-                    .setUri(song.contentUri)
-                    .setMediaMetadata(
-                        MediaMetadata.Builder()
-                            .setTitle(song.title)
-                            .setArtist(song.artist)
-                            .setAlbumTitle(song.album)
-                            .setArtworkUri(song.albumArtUri)
-                            .build()
-                    )
-                    .build()
-            }
+            val mediaItems = context.map(::mediaItemFor)
             controller.setMediaItems(mediaItems, safeIndex, 0L)
             controller.prepare()
             controller.play()
@@ -259,6 +262,75 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch { repository.recordHistory(target.id) }
         _openNowPlayingEvents.tryEmit(Unit)
+    }
+
+    /** Insert a song immediately after the currently playing item. */
+    fun playNextSong(song: Song) {
+        val controller = mediaController ?: return
+        val insertAt = (controller.currentMediaItemIndex + 1).coerceAtMost(controller.mediaItemCount)
+        controller.addMediaItem(insertAt, mediaItemFor(song))
+        syncQueueFromController()
+    }
+
+    /** Add a song to the end of the current queue. */
+    fun enqueueSong(song: Song) {
+        mediaController?.addMediaItem(mediaItemFor(song))
+        syncQueueFromController()
+    }
+
+    /** Seek relative to the current position; positive = forward, negative = backward. */
+    fun seekBy(deltaMs: Long) {
+        val controller = mediaController ?: return
+        val duration = controller.duration.takeIf { it > 0L } ?: Long.MAX_VALUE
+        val target = (controller.currentPosition + deltaMs).coerceIn(0L, duration)
+        controller.seekTo(target)
+        currentPosition.value = target
+    }
+
+    fun startSleepTimer(minutes: Int) {
+        val safeMinutes = minutes.coerceIn(1, 180)
+        sleepTimerJob?.cancel()
+        _sleepTimerRemainingMs.value = safeMinutes * 60_000L
+        sleepTimerJob = viewModelScope.launch {
+            while (_sleepTimerRemainingMs.value > 0L) {
+                delay(1_000L)
+                _sleepTimerRemainingMs.update { (it - 1_000L).coerceAtLeast(0L) }
+            }
+            mediaController?.pause()
+            sleepTimerJob = null
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimerRemainingMs.value = 0L
+    }
+
+    fun addSongToPlaylist(playlistId: Long, songId: Long) {
+        viewModelScope.launch {
+            val existing = repository.getSongsForPlaylist(playlistId).first()
+            if (songId !in existing) {
+                repository.addSongToPlaylist(playlistId, songId, existing.size)
+            }
+        }
+    }
+
+    fun createPlaylistAndAddSong(name: String, songId: Long) {
+        val cleanName = name.trim()
+        if (cleanName.isBlank()) return
+        viewModelScope.launch {
+            val id = repository.createPlaylist(cleanName)
+            repository.addSongToPlaylist(id, songId, 0)
+        }
+    }
+
+    fun removeQueueItem(index: Int) {
+        val controller = mediaController ?: return
+        if (index in 0 until controller.mediaItemCount && index != controller.currentMediaItemIndex) {
+            controller.removeMediaItem(index)
+            syncQueueFromController()
+        }
     }
 
     fun playQueueIndex(index: Int) {
@@ -345,13 +417,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun applyEqualizerPreset(preset: String) = EqualizerController.applyPreset(preset)
 
-    fun setEqualizerBass(strength: Int) = EqualizerController.setBassStrength(strength)
+    fun setEqualizerBassDb(db: Float) = EqualizerController.setBassDb(db)
 
-    fun setEqualizerClarity(strength: Int) = EqualizerController.setClarityStrength(strength)
+    fun setEqualizerMidDb(db: Float) = EqualizerController.setMidDb(db)
 
-    fun setEqualizerRoom(room: String) = EqualizerController.setRoom(room)
+    fun setEqualizerTrebleDb(db: Float) = EqualizerController.setTrebleDb(db)
 
     fun setEqualizerBand(index: Int, levelMb: Int) = EqualizerController.setBandLevel(index, levelMb)
+
+    fun resetEqualizer() = EqualizerController.reset()
 
     fun dismissPlayer() {
         mediaController?.clearMediaItems()

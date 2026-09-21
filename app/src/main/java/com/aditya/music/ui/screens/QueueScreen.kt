@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ClearAll
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -56,7 +57,16 @@ fun QueueScreen(
                     },
                     supportingContent = { Text(song.artist) },
                     leadingContent = { AdityaLogo(size = 32.dp) },
-                    trailingContent = { Text(song.formattedDuration) },
+                    trailingContent = {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Text(song.formattedDuration)
+                            if (!isCurrent) {
+                                IconButton(onClick = { viewModel.removeQueueItem(index) }) {
+                                    Icon(Icons.Rounded.Close, "Remove from queue")
+                                }
+                            }
+                        }
+                    },
                     modifier = Modifier.clickable { viewModel.playQueueIndex(index) }
                 )
             }
