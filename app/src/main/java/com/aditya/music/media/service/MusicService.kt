@@ -3,8 +3,6 @@ package com.aditya.music.media.service
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
-import android.os.Handler
-import android.os.Looper
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -41,19 +39,6 @@ class MusicService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private var equalizerManager: EqualizerManager? = null
     private var restoringState = false
-    private val notificationHandler = Handler(Looper.getMainLooper())
-
-    private val notificationTicker = object : Runnable {
-        override fun run() {
-            val session = mediaSession
-            val currentPlayer = player
-            if (session != null && currentPlayer != null) {
-                onUpdateNotification(session, currentPlayer.isPlaying)
-                if (currentPlayer.isPlaying) notificationHandler.postDelayed(this, 1000L)
-            }
-        }
-    }
-
     private val playerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             rebuildEqualizer(audioSessionId)
@@ -73,12 +58,10 @@ class MusicService : MediaLibraryService() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             persistPlaybackState()
-            refreshNotificationTicker()
         }
 
         override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
             persistPlaybackState()
-            refreshNotificationTicker()
         }
     }
 
@@ -117,17 +100,31 @@ class MusicService : MediaLibraryService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // The custom provider adds an informational progress bar + elapsed/total text for
-        // notification surfaces that support it. The same MediaSession is still the source of
-        // truth for Android 11+ interactive System UI seeking.
+        // Keep the notification fully MediaStyle-native so System UI/lock-screen seeking is
+        // connected to the real MediaSession instead of a decorative RemoteViews progress bar.
         setMediaNotificationProvider(ProgressMediaNotificationProvider(this))
 
         mediaSession = MediaLibrarySession.Builder(
             this,
             exoPlayer,
-            object : MediaLibrarySession.Callback {}
+            object : MediaLibrarySession.Callback {
+                override fun onConnect(
+                    session: MediaSession,
+                    controllerInfo: MediaSession.ControllerInfo
+                ): MediaSession.ConnectionResult {
+                    // Explicitly expose every supported player command to the System UI media
+                    // controller, including COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM. This is what
+                    // allows the legacy lock-screen MediaStyle surface to seek the actual player.
+                    val playerCommands = Player.Commands.Builder().addAllCommands().build()
+                    return MediaSession.ConnectionResult.accept(
+                        MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS,
+                        playerCommands
+                    )
+                }
+            }
         )
             .setSessionActivity(sessionActivity)
+            .setPeriodicPositionUpdateEnabled(true)
             .build()
 
     }
@@ -236,20 +233,7 @@ class MusicService : MediaLibraryService() {
         return mediaSession
     }
 
-    private fun refreshNotificationTicker() {
-        notificationHandler.removeCallbacks(notificationTicker)
-        mediaSession?.let { session ->
-            player?.let { currentPlayer ->
-                onUpdateNotification(session, currentPlayer.isPlaying)
-                if (currentPlayer.isPlaying) {
-                    notificationHandler.postDelayed(notificationTicker, 1000L)
-                }
-            }
-        }
-    }
-
     override fun onDestroy() {
-        notificationHandler.removeCallbacks(notificationTicker)
         EqualizerController.detach(equalizerManager)
         equalizerManager?.release()
         equalizerManager = null

@@ -19,16 +19,26 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = AdityaIndigo,
-    secondary = AdityaPink,
-    tertiary = AdityaAmber,
-    background = BackgroundLight,
-    surface = SurfaceLight,
-    surfaceVariant = CardLight,
+    primary = AdityaIndigoDark,
     onPrimary = Color.White,
+    primaryContainer = Color(0xFFE0E7FF),
+    onPrimaryContainer = Color(0xFF1E1B4B),
+    secondary = Color(0xFFB4236E),
     onSecondary = Color.White,
+    secondaryContainer = Color(0xFFFCE7F3),
+    onSecondaryContainer = Color(0xFF500724),
+    tertiary = Color(0xFF9A6500),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFFFEFC6),
+    onTertiaryContainer = Color(0xFF3D2A00),
+    background = BackgroundLight,
     onBackground = TextPrimaryLight,
-    onSurface = TextPrimaryLight
+    surface = SurfaceLight,
+    onSurface = TextPrimaryLight,
+    surfaceVariant = Color(0xFFE8EDF4),
+    onSurfaceVariant = Color(0xFF334155),
+    outline = Color(0xFF64748B),
+    outlineVariant = Color(0xFFCBD5E1)
 )
 
 private val AmoledColorScheme = darkColorScheme(

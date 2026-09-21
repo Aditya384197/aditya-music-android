@@ -17,10 +17,27 @@ data class HeadsetProfile(
     val gainsDb: List<Float>
 ) {
     fun matches(query: String): Boolean {
-        val q = query.trim()
+        val q = normalize(query)
         if (q.isBlank()) return true
-        return name.contains(q, ignoreCase = true) || source.contains(q, ignoreCase = true)
+
+        val candidates = buildList {
+            add(name)
+            add(source)
+            // Common brand spelling differences used by users when searching offline.
+            add(name.replace("Zebronics", "ZEB", ignoreCase = true))
+            add(name.replace("boAt", "Boat", ignoreCase = true))
+            add(name.replace("B&O", "Bang & Olufsen", ignoreCase = true))
+        }
+        return candidates.any { normalize(it).contains(q) }
     }
+
+    private fun normalize(value: String): String = value
+        .trim()
+        .lowercase()
+        .replace("&", "and")
+        .replace("zebronics", "zeb")
+        .replace("boat", "boat")
+        .replace(Regex("[^a-z0-9]+"), "")
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)

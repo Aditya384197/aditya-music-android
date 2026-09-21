@@ -1,5 +1,10 @@
 package com.aditya.music.ui.navigation
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -7,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -25,7 +31,18 @@ fun AdityaNavGraph(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val hasActiveSong by viewModel.currentSong.collectAsState()
+    var miniPlayerVisible by remember { mutableStateOf(false) }
 
+    LaunchedEffect(currentRoute, hasActiveSong != null) {
+        if (currentRoute == Screen.NowPlaying.route || hasActiveSong == null) {
+            miniPlayerVisible = false
+        } else {
+            // Let the Now Playing destination finish leaving before the Mini Player enters.
+            delay(260L)
+            miniPlayerVisible = true
+        }
+    }
 
     LaunchedEffect(navController) {
         viewModel.openNowPlayingEvents.collect {
@@ -130,12 +147,18 @@ fun AdityaNavGraph(
             // Keep MiniPlayer's fast-changing playback state isolated from the NavHost.
             // This prevents a position tick from recomposing the whole Home screen while scrolling.
             Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-                ConnectedMiniPlayer(
-                    viewModel = viewModel,
-                    visible = currentRoute != Screen.NowPlaying.route,
-                    onClick = { navController.navigate(Screen.NowPlaying.route) { launchSingleTop = true } },
-                    onDismiss = viewModel::dismissPlayer
-                )
+                AnimatedVisibility(
+                    visible = miniPlayerVisible && currentRoute != Screen.NowPlaying.route,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
+                    ConnectedMiniPlayer(
+                        viewModel = viewModel,
+                        visible = true,
+                        onClick = { navController.navigate(Screen.NowPlaying.route) { launchSingleTop = true } },
+                        onDismiss = viewModel::dismissPlayer
+                    )
+                }
             }
         }
     }
