@@ -115,11 +115,37 @@ class MusicService : MediaLibraryService() {
                     // Explicitly expose every supported player command to the System UI media
                     // controller, including COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM. This is what
                     // allows the legacy lock-screen MediaStyle surface to seek the actual player.
-                    val playerCommands = Player.Commands.Builder().addAllCommands().build()
+                    val playerCommands = Player.Commands.Builder()
+                        .addAllCommands()
+                        .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                        .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
+                        .build()
                     return MediaSession.ConnectionResult.accept(
                         MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS,
                         playerCommands
                     )
+                }
+
+                override fun onPostConnect(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo
+                ) {
+                    // Android System UI builds the lock-screen seek bar from the platform
+                    // PlaybackState. Explicitly grant the media-notification controller the
+                    // seek commands so ACTION_SEEK_TO is present and the system slider is
+                    // genuinely draggable instead of being a decorative progress line.
+                    val notificationController = session.getMediaNotificationControllerInfo()
+                    if (notificationController != null && notificationController == controller) {
+                        session.setAvailableCommands(
+                            controller,
+                            androidx.media3.session.SessionCommands.Builder().addAllCommands().build(),
+                            Player.Commands.Builder()
+                                .addAllCommands()
+                                .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                                .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
+                                .build()
+                        )
+                    }
                 }
             }
         )

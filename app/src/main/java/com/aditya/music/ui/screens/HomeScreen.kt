@@ -147,7 +147,7 @@ fun HomeScreen(
                             Spacer(Modifier.width(9.dp))
                             Column {
                                 Text(
-                                    "Aditya Music",
+                                    "AK Music",
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold
                                 )

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Aditya Music</string>
+    <string name="app_name">Music</string>
     <string name="developer_name">Aditya</string>
     <string name="app_subtitle">Premium Offline Audio Player</string>
     <string name="nav_home">Home</string>
