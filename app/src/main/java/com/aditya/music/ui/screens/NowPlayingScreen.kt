@@ -3,7 +3,6 @@ package com.aditya.music.ui.screens
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -48,7 +47,10 @@ fun NowPlayingScreen(
     val isShuffle by viewModel.isShuffle.collectAsState()
     val repeatMode by viewModel.repeatMode.collectAsState()
     val equalizerState by viewModel.equalizerState.collectAsState()
+    val favoriteSongs by viewModel.favoriteSongs.collectAsState()
+    val isCurrentFavorite = currentSong?.id?.let { id -> favoriteSongs.any { it.id == id } } == true
     var showEqualizer by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -56,12 +58,44 @@ fun NowPlayingScreen(
                 title = { Text("Now Playing", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Close")
+                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = onOpenQueue) {
-                        Icon(Icons.Rounded.QueueMusic, contentDescription = "Queue")
+                    IconButton(onClick = { showEqualizer = true }) {
+                        Icon(
+                            Icons.Rounded.Tune,
+                            contentDescription = "Equalizer",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Box {
+                        IconButton(onClick = { showMoreMenu = true }) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = "More")
+                        }
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Playing queue") },
+                                leadingIcon = { Icon(Icons.Rounded.QueueMusic, contentDescription = null) },
+                                onClick = {
+                                    showMoreMenu = false
+                                    onOpenQueue()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(if (isCurrentFavorite) "Remove favorite" else "Add to favorites")
+                                },
+                                leadingIcon = { Icon(Icons.Rounded.FavoriteBorder, contentDescription = null) },
+                                onClick = {
+                                    currentSong?.id?.let(viewModel::toggleFavorite)
+                                    showMoreMenu = false
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -85,25 +119,6 @@ fun NowPlayingScreen(
                 ) {
                     AdityaLogo(size = 140.dp)
 
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .size(52.dp)
-                            .clickable { showEqualizer = true },
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                        tonalElevation = 8.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.GraphicEq,
-                                contentDescription = "Equalizer",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
                 }
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -344,6 +359,7 @@ private fun EqualizerBottomSheet(
         }
     }
 }
+
 
 private fun formatFrequency(hz: Int): String = when {
     hz >= 1000 -> {

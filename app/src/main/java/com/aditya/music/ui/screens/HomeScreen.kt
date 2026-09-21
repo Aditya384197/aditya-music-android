@@ -1,12 +1,21 @@
 package com.aditya.music.ui.screens
 
+import android.app.Activity
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -16,140 +25,523 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import com.aditya.music.data.model.Song
 import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.viewmodel.MusicViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+private enum class HomeFilter {
+    Recent,
+    Favorites,
+    Albums
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(
     viewModel: MusicViewModel,
-    onNavigateToSongs: () -> Unit,
-    onNavigateToSettings: () -> Unit,
-    onNavigateToPlaylists: () -> Unit,
-    onOpenNowPlaying: () -> Unit
+    onNavigateToSettings: () -> Unit
 ) {
     val songs by viewModel.allSongs.collectAsState()
     val recentlyPlayed by viewModel.recentlyPlayedSongs.collectAsState()
     val favorites by viewModel.favoriteSongs.collectAsState()
-    val playlists by viewModel.playlists.collectAsState()
+    val albums by viewModel.albums.collectAsState()
+    val currentSong by viewModel.currentSong.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
+    val context = LocalContext.current
+
+    var selectedFilter by remember { mutableStateOf<HomeFilter?>(null) }
+    var selectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    val isSelectionMode = selectedIds.isNotEmpty()
+
+    val deletePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.onDeletePermissionGranted()
+        } else {
+            viewModel.onDeletePermissionDenied()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.deletePermissionRequest.collect { intentSender ->
+            deletePermissionLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.deleteResultEvents.collect { success ->
+            Toast.makeText(
+                context,
+                if (success) "Deleted" else "Delete cancelled",
+                Toast.LENGTH_SHORT
+            ).show()
+            if (success) selectedIds = emptySet()
+        }
+    }
+
+    fun clearSelection() {
+        selectedIds = emptySet()
+    }
+
+    fun toggleSelection(id: Long) {
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+
+    val filterSongs = when (selectedFilter) {
+        HomeFilter.Recent -> recentlyPlayed
+        HomeFilter.Favorites -> favorites
+        null, HomeFilter.Albums -> songs
+    }
+
+    val orderedSongs = remember(
+        songs,
+        recentlyPlayed,
+        favorites,
+        currentSong?.id,
+        selectedFilter,
+        searchQuery
+    ) {
+        val query = searchQuery.trim()
+        val base = if (query.isBlank()) {
+            filterSongs
+        } else {
+            filterSongs.filter {
+                it.title.contains(query, ignoreCase = true) ||
+                    it.artist.contains(query, ignoreCase = true) ||
+                    it.album.contains(query, ignoreCase = true)
+            }
+        }
+
+        if (selectedFilter == null) {
+            val recentOrder = recentlyPlayed.mapIndexed { index, song -> song.id to index }.toMap()
+            base.sortedWith(
+                compareBy<Song> { if (it.id == currentSong?.id) 0 else 1 }
+                    .thenBy { recentOrder[it.id] ?: Int.MAX_VALUE }
+                    .thenBy { it.title.lowercase() }
+            )
+        } else {
+            base
+        }
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        AdityaLogo(size = 32.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("Aditya Music", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text("By Aditya", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            if (isSelectionMode) {
+                TopAppBar(
+                    title = { Text("${selectedIds.size} selected") },
+                    navigationIcon = {
+                        IconButton(onClick = ::clearSelection) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Cancel selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { selectedIds = orderedSongs.map { it.id }.toSet() }) {
+                            Icon(Icons.Rounded.SelectAll, contentDescription = "Select all")
+                        }
+                        IconButton(onClick = {
+                            viewModel.shareSongs(orderedSongs.filter { it.id in selectedIds }, context)
+                        }) {
+                            Icon(Icons.Rounded.Share, contentDescription = "Share")
+                        }
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Rounded.Delete, contentDescription = "Delete")
                         }
                     }
-                },
-                actions = {
-                    IconButton(onClick = viewModel::refreshLibrary) { Icon(Icons.Rounded.Refresh, "Refresh Library") }
-                    IconButton(onClick = onNavigateToSettings) { Icon(Icons.Rounded.Settings, "Settings") }
-                }
-            )
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            AdityaLogo(size = 32.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text("Aditya Music", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text("My Music", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = viewModel::refreshLibrary) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh Library")
+                        }
+                        IconButton(onClick = onNavigateToSettings) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        }
+                    }
+                )
+            }
         }
     ) { padding ->
         when {
-            isScanning -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            songs.isEmpty() -> EmptyHome(Modifier.fillMaxSize().padding(padding), viewModel::refreshLibrary)
-            else -> LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 112.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth().clickable { viewModel.playSongs(songs, 0) },
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                    ) {
-                        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("Quick Play", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("${songs.size} offline tracks available", style = MaterialTheme.typography.bodyMedium)
+            isScanning -> {
+                Box(
+                    Modifier.fillMaxSize().padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+            songs.isEmpty() -> {
+                EmptyHome(
+                    Modifier.fillMaxSize().padding(padding),
+                    viewModel::refreshLibrary
+                )
+            }
+            else -> {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(padding)
+                ) {
+                    if (!isSelectionMode) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.LibraryMusic,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(28.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text("My Music", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "${songs.size} ${if (songs.size == 1) "song" else "songs"} on this device",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
-                            FilledIconButton(onClick = { viewModel.playSongs(songs, 0) }) { Icon(Icons.Rounded.PlayArrow, "Play") }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = viewModel::setSearchQuery,
+                                modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Search your music…") },
+                                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                                            Icon(Icons.Rounded.Close, contentDescription = "Clear search")
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = MaterialTheme.shapes.large
+                            )
+
+                            Spacer(Modifier.height(10.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                HomeFilterChip(
+                                    label = "Recent",
+                                    icon = Icons.Rounded.History,
+                                    selected = selectedFilter == HomeFilter.Recent,
+                                    onClick = {
+                                        selectedFilter = if (selectedFilter == HomeFilter.Recent) null else HomeFilter.Recent
+                                    }
+                                )
+                                HomeFilterChip(
+                                    label = "Favorites",
+                                    icon = Icons.Rounded.Favorite,
+                                    selected = selectedFilter == HomeFilter.Favorites,
+                                    onClick = {
+                                        selectedFilter = if (selectedFilter == HomeFilter.Favorites) null else HomeFilter.Favorites
+                                    }
+                                )
+                                HomeFilterChip(
+                                    label = "Albums",
+                                    icon = Icons.Rounded.Album,
+                                    selected = selectedFilter == HomeFilter.Albums,
+                                    onClick = {
+                                        selectedFilter = if (selectedFilter == HomeFilter.Albums) null else HomeFilter.Albums
+                                    }
+                                )
+                            }
                         }
                     }
-                }
 
-                item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Recently Played", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        Text("${recentlyPlayed.size}/20", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                if (recentlyPlayed.isEmpty()) {
-                    item { Text("Play songs and your latest 20 unique tracks will stay here.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                } else {
-                    item {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            itemsIndexed(recentlyPlayed, key = { _, song -> song.id }) { index, song -> RecentSongCard(song) {
-                                viewModel.playSongs(recentlyPlayed, index)
-                            } }
+                    if (selectedFilter == HomeFilter.Albums && !isSelectionMode) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 145.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            gridItems(albums, key = { it.id }) { album ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(18.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { viewModel.playSongs(album.songs, 0) }
+                                            .padding(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(135.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            AdityaLogo(size = 54.dp)
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            album.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            "${album.artist} • ${album.songCount} songs",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
+                    } else {
+                        if (orderedSongs.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().padding(24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        Icons.Rounded.MusicOff,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(52.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    Text(
+                                        when (selectedFilter) {
+                                            HomeFilter.Recent -> "No recently played music"
+                                            HomeFilter.Favorites -> "No favorite songs yet"
+                                            else -> "No music matches your search"
+                                        },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(bottom = 112.dp)
+                            ) {
+                                item {
+                                    Text(
+                                        when (selectedFilter) {
+                                            HomeFilter.Recent -> "Recently Played"
+                                            HomeFilter.Favorites -> "Favorites"
+                                            else -> "All Music"
+                                        },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                    )
+                                }
 
-                item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Playlists", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onNavigateToPlaylists) { Text(if (playlists.isEmpty()) "Add" else "View all") }
-                    }
-                }
-                if (playlists.isEmpty()) item { TextButton(onClick = onNavigateToPlaylists) { Icon(Icons.Rounded.Add, null); Spacer(Modifier.width(6.dp)); Text("Add Playlist") } }
-                else items(playlists.take(5), key = { it.id }) { playlist ->
-                    ListItem(
-                        headlineContent = { Text(playlist.name, fontWeight = FontWeight.SemiBold) },
-                        supportingContent = { Text("Playlist") },
-                        leadingContent = { Icon(Icons.Rounded.QueueMusic, null) },
-                        modifier = Modifier.clickable(onClick = onNavigateToPlaylists)
-                    )
-                }
+                                itemsIndexed(
+                                    orderedSongs,
+                                    key = { _, song -> song.id }
+                                ) { index, song ->
+                                    val isSelected = song.id in selectedIds
+                                    val isCurrent = song.id == currentSong?.id
 
-                if (favorites.isNotEmpty()) {
-                    item { Text("Favorites", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                    itemsIndexed(favorites.take(5), key = { _, song -> song.id }) { favIndex, song ->
-                        ListItem(
-                            headlineContent = { Text(song.title, fontWeight = FontWeight.SemiBold) },
-                            supportingContent = { Text(song.artist) },
-                            leadingContent = { AdityaLogo(size = 36.dp) },
-                            trailingContent = { IconButton(onClick = { viewModel.playSongs(favorites, favIndex) }) { Icon(Icons.Rounded.PlayArrow, "Play") } },
-                            modifier = Modifier.clickable { viewModel.playSongs(favorites, favIndex) }
-                        )
+                                    ListItem(
+                                        headlineContent = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    song.title,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+                                                if (isCurrent) {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Icon(
+                                                        Icons.Rounded.GraphicEq,
+                                                        contentDescription = "Currently playing",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        supportingContent = {
+                                            Text(
+                                                "${song.artist} • ${song.formattedDuration}",
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        leadingContent = {
+                                            if (isSelectionMode) {
+                                                Checkbox(
+                                                    checked = isSelected,
+                                                    onCheckedChange = { toggleSelection(song.id) }
+                                                )
+                                            } else {
+                                                AdityaLogo(size = 40.dp)
+                                            }
+                                        },
+                                        trailingContent = {
+                                            if (!isSelectionMode) {
+                                                IconButton(onClick = { viewModel.toggleFavorite(song.id) }) {
+                                                    Icon(
+                                                        if (song.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                                        contentDescription = if (song.isFavorite) "Remove favorite" else "Favorite",
+                                                        tint = if (song.isFavorite) MaterialTheme.colorScheme.error
+                                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        colors = if (isSelected || isCurrent) {
+                                            ListItemDefaults.colors(
+                                                containerColor = if (isSelected) {
+                                                    MaterialTheme.colorScheme.primaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                                }
+                                            )
+                                        } else {
+                                            ListItemDefaults.colors()
+                                        },
+                                        modifier = Modifier.combinedClickable(
+                                            onClick = {
+                                                if (isSelectionMode) toggleSelection(song.id)
+                                                else viewModel.playSongs(orderedSongs, index)
+                                            },
+                                            onLongClick = { toggleSelection(song.id) }
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+
+    if (showDeleteDialog) {
+        val toDelete = orderedSongs.filter { it.id in selectedIds }
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = {
+                Text(if (toDelete.size == 1) "Delete song?" else "Delete ${toDelete.size} songs?")
+            },
+            text = {
+                Text(
+                    if (toDelete.size == 1) {
+                        "\"${toDelete.first().title}\" will be permanently deleted from your device."
+                    } else {
+                        "These ${toDelete.size} songs will be permanently deleted from your device."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteSongs(toDelete)
+                        showDeleteDialog = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
-private fun RecentSongCard(song: Song, onClick: () -> Unit) {
-    Card(modifier = Modifier.width(150.dp).clickable(onClick = onClick), shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.padding(10.dp)) {
-            Box(Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) { AdityaLogo(size = 42.dp) }
-            Spacer(Modifier.height(8.dp))
-            Text(song.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            Text(song.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-        }
-    }
+private fun HomeFilterChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        modifier = Modifier.weight(1f),
+        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        label = { Text(label, maxLines = 1) }
+    )
 }
 
 @Composable
 private fun EmptyHome(modifier: Modifier, onRefresh: () -> Unit) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-            Icon(Icons.Rounded.MusicOff, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(16.dp)); Text("No music found", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp)); Text("Add audio files to your device storage and refresh your library.")
-            Spacer(Modifier.height(20.dp)); Button(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, null); Spacer(Modifier.width(8.dp)); Text("Scan Audio Files") }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(24.dp)
+        ) {
+            Icon(
+                Icons.Rounded.MusicOff,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "No music found",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(8.dp))
+            Text("Add audio files to your device storage and scan again.")
+            Spacer(Modifier.height(20.dp))
+            Button(onClick = onRefresh) {
+                Icon(Icons.Rounded.Refresh, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Scan Audio Files")
+            }
         }
     }
 }

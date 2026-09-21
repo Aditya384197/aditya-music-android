@@ -9,7 +9,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -44,11 +43,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val themeMode by viewModel.themeMode.collectAsState()
-            val useDarkTheme = when (themeMode) {
-                "light" -> false
-                "dark", "amoled" -> true
-                else -> isSystemInDarkTheme()
-            }
+            val useDarkTheme = themeMode != "light"
 
             AdityaMusicTheme(darkTheme = useDarkTheme, amoled = themeMode == "amoled") {
                 Surface(

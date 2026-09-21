@@ -40,8 +40,6 @@ fun AdityaNavGraph(
 
     val navItems = listOf(
         BottomNavItem(Screen.Home, Icons.Rounded.Home, "Home"),
-        BottomNavItem(Screen.Songs, Icons.Rounded.MusicNote, "Songs"),
-        BottomNavItem(Screen.Albums, Icons.Rounded.Album, "Albums"),
         BottomNavItem(Screen.Artists, Icons.Rounded.Person, "Artists"),
         BottomNavItem(Screen.Playlists, Icons.Rounded.QueueMusic, "Playlists")
     )
@@ -79,10 +77,7 @@ fun AdityaNavGraph(
                 composable(Screen.Home.route) {
                     HomeScreen(
                         viewModel = viewModel,
-                        onNavigateToSongs = { navController.navigate(Screen.Songs.route) },
-                        onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
-                        onNavigateToPlaylists = { navController.navigate(Screen.Playlists.route) },
-                        onOpenNowPlaying = { navController.navigate(Screen.NowPlaying.route) }
+                        onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
                     )
                 }
                 composable(Screen.Songs.route) {
@@ -134,7 +129,8 @@ fun AdityaNavGraph(
                         isPlaying = isPlaying,
                         onPlayPause = { viewModel.togglePlayPause() },
                         onNext = { viewModel.playNext() },
-                        onClick = { navController.navigate(Screen.NowPlaying.route) }
+                        onClick = { navController.navigate(Screen.NowPlaying.route) },
+                        onDismiss = { viewModel.dismissPlayer() }
                     )
                 }
             }

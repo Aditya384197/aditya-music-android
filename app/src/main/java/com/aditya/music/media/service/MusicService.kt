@@ -142,6 +142,14 @@ class MusicService : MediaLibraryService() {
         startInForegroundRequired: Boolean
     ) {
         val currentPlayer = session.player
+
+        // While playing, use Media3's native MediaStyle notification. Android 10+ can then
+        // expose the MediaSession seek bar and route drag gestures to the player's seekTo().
+        if (currentPlayer.isPlaying) {
+            mainHandler.removeCallbacks(removePausedNotification)
+            super.onUpdateNotification(session, startInForegroundRequired)
+            return
+        }
         if (currentPlayer.mediaItemCount == 0) {
             mainHandler.removeCallbacks(removePausedNotification)
             stopForeground(STOP_FOREGROUND_REMOVE)

@@ -59,7 +59,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val playbackQueue = MutableStateFlow<List<Song>>(emptyList())
     val isShuffle = MutableStateFlow(false)
     val repeatMode = MutableStateFlow("off")
-    val themeMode = MutableStateFlow("system")
+    val themeMode = MutableStateFlow(
+        application.getSharedPreferences("aditya_music_preferences", Application.MODE_PRIVATE)
+            .getString("theme_mode", "dark")
+            ?: "dark"
+    )
 
     val equalizerState: StateFlow<EqualizerState> = EqualizerController.state
 
@@ -328,7 +332,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setTheme(theme: String) {
-        themeMode.value = theme
+        val safeTheme = theme.takeIf { it == "dark" || it == "light" || it == "amoled" } ?: "dark"
+        themeMode.value = safeTheme
+        getApplication<Application>()
+            .getSharedPreferences("aditya_music_preferences", Application.MODE_PRIVATE)
+            .edit()
+            .putString("theme_mode", safeTheme)
+            .apply()
     }
 
     fun setEqualizerEnabled(enabled: Boolean) = EqualizerController.setEnabled(enabled)
@@ -342,6 +352,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setEqualizerRoom(room: String) = EqualizerController.setRoom(room)
 
     fun setEqualizerBand(index: Int, levelMb: Int) = EqualizerController.setBandLevel(index, levelMb)
+
+    fun dismissPlayer() {
+        mediaController?.clearMediaItems()
+        currentSong.value = null
+        currentPosition.value = 0L
+        isPlaying.value = false
+        playbackQueue.value = emptyList()
+    }
 
     fun clearQueue() {
         val controller = mediaController ?: return
