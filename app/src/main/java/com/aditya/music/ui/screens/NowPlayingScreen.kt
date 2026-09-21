@@ -339,7 +339,38 @@ private fun EqualizerBottomSheet(
                 )
             }
 
-            Spacer(Modifier.height(12.dp))
+            if (state.headsetProfileName != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (state.headsetProfileActive) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(
+                            if (state.headsetProfileActive) "Auto-tuned headset" else "Headset profile selected",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            state.headsetProfileName!!,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        state.headsetProfileSource?.let { source ->
+                            Text(
+                                "Measured source: $source",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
 
             Surface(
                 shape = RoundedCornerShape(14.dp),

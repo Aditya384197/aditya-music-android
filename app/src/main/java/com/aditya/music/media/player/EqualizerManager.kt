@@ -1,6 +1,8 @@
 package com.aditya.music.media.player
 
 import android.content.Context
+import com.aditya.music.data.headset.HeadsetProfile
+import org.json.JSONObject
 import android.media.audiofx.Equalizer
 import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +29,10 @@ data class EqualizerState(
     val bandLevelsMb: List<Short> = emptyList(),
     val bandFrequenciesHz: List<Int> = emptyList(),
     val bandLevelMinMb: Int = -1500,
-    val bandLevelMaxMb: Int = 1500
+    val bandLevelMaxMb: Int = 1500,
+    val headsetProfileName: String? = null,
+    val headsetProfileSource: String? = null,
+    val headsetProfileActive: Boolean = false
 )
 
 const val PRESET_FLAT = "Flat"
@@ -37,6 +42,7 @@ const val PRESET_DANCE = "Dance"
 const val PRESET_CLASSICAL = "Classical"
 const val PRESET_VOCAL = "Vocal"
 const val PRESET_CUSTOM = "Custom"
+const val PRESET_HEADSET = "Headset"
 
 private const val PREFS_NAME = "aditya_music_equalizer"
 private const val KEY_ENABLED = "enabled"
@@ -46,7 +52,9 @@ private const val KEY_MID_DB = "mid_db"
 private const val KEY_TREBLE_DB = "treble_db"
 private const val KEY_BANDS = "bands"
 private const val KEY_SCHEMA = "schema"
-private const val CURRENT_SCHEMA = 2
+private const val KEY_HEADSET_PROFILE = "headset_profile"
+private const val KEY_HEADSET_ACTIVE = "headset_active"
+private const val CURRENT_SCHEMA = 3
 
 private const val MIN_TONE_DB = -6f
 private const val MAX_TONE_DB = 6f
@@ -118,6 +126,11 @@ object EqualizerController {
         sync()
     }
 
+    fun applyHeadsetProfile(profile: HeadsetProfile) {
+        manager?.applyHeadsetProfile(profile)
+        sync()
+    }
+
     fun reset() {
         manager?.reset()
         sync()
@@ -143,6 +156,8 @@ class EqualizerManager(
     private var bassDb = 0f
     private var midDb = 0f
     private var trebleDb = 0f
+    private var headsetProfile: HeadsetProfile? = null
+    private var headsetProfileActive = false
     private var bandLevelMinMbInternal = -1500
     private var bandLevelMaxMbInternal = 1500
 
@@ -196,7 +211,10 @@ class EqualizerManager(
         bandLevelsMb = bandLevelsMbInternal.toList(),
         bandFrequenciesHz = bandFrequenciesHzInternal.toList(),
         bandLevelMinMb = bandLevelMinMbInternal,
-        bandLevelMaxMb = bandLevelMaxMbInternal
+        bandLevelMaxMb = bandLevelMaxMbInternal,
+        headsetProfileName = headsetProfile?.name,
+        headsetProfileSource = headsetProfile?.source,
+        headsetProfileActive = headsetProfileActive && enabled
     )
 
     fun setEnabled(value: Boolean) {
@@ -226,6 +244,7 @@ class EqualizerManager(
         trebleDb = tones[2]
         preset = canonical
         enabled = canonical != PRESET_FLAT && supported
+        headsetProfileActive = false
 
         applyAllBandLevels()
         applyEnabledState()
@@ -236,6 +255,7 @@ class EqualizerManager(
         bassDb = value.coerceIn(MIN_TONE_DB, MAX_TONE_DB)
         preset = PRESET_CUSTOM
         enabled = supported
+        headsetProfileActive = false
         applyAllBandLevels()
         applyEnabledState()
         persist()
@@ -245,6 +265,7 @@ class EqualizerManager(
         midDb = value.coerceIn(MIN_TONE_DB, MAX_TONE_DB)
         preset = PRESET_CUSTOM
         enabled = supported
+        headsetProfileActive = false
         applyAllBandLevels()
         applyEnabledState()
         persist()
@@ -254,6 +275,7 @@ class EqualizerManager(
         trebleDb = value.coerceIn(MIN_TONE_DB, MAX_TONE_DB)
         preset = PRESET_CUSTOM
         enabled = supported
+        headsetProfileActive = false
         applyAllBandLevels()
         applyEnabledState()
         persist()
@@ -266,6 +288,7 @@ class EqualizerManager(
         baseBandLevelsMbInternal[band] = clamped
         preset = PRESET_CUSTOM
         enabled = supported
+        headsetProfileActive = false
         applyAllBandLevels()
         applyEnabledState()
         persist()
@@ -282,6 +305,8 @@ class EqualizerManager(
         trebleDb = 0f
         preset = PRESET_FLAT
         enabled = false
+        headsetProfile = null
+        headsetProfileActive = false
         applyAllBandLevels()
         applyEnabledState()
         persist()
@@ -347,6 +372,25 @@ class EqualizerManager(
                     .toShort()
             }
         }
+
+        val rawProfile = prefs.getString(KEY_HEADSET_PROFILE, null)
+        val active = prefs.getBoolean(KEY_HEADSET_ACTIVE, false)
+        headsetProfile = rawProfile?.let { runCatching { HeadsetProfile.fromJson(JSONObject(it)) }.getOrNull() }
+        headsetProfileActive = active && headsetProfile != null
+        if (headsetProfileActive && headsetProfile != null) {
+            val profile = headsetProfile!!
+            for (index in bandFrequenciesHzInternal.indices) {
+                val hz = bandFrequenciesHzInternal[index]
+                baseBandLevelsMbInternal[index] = dbToMillibel(
+                    interpolateMeasuredDb(hz, profile.frequenciesHz, profile.gainsDb) + profile.preampDb
+                )
+            }
+            bassDb = 0f
+            midDb = 0f
+            trebleDb = 0f
+            preset = PRESET_HEADSET
+            enabled = supported
+        }
     }
 
     private fun persist() {
@@ -358,6 +402,8 @@ class EqualizerManager(
             .putFloat(KEY_MID_DB, midDb)
             .putFloat(KEY_TREBLE_DB, trebleDb)
             .putString(KEY_BANDS, baseBandLevelsMbInternal.joinToString(",") { it.toString() })
+            .putString(KEY_HEADSET_PROFILE, headsetProfile?.toJson()?.toString())
+            .putBoolean(KEY_HEADSET_ACTIVE, headsetProfileActive)
             .putInt(KEY_SCHEMA, CURRENT_SCHEMA)
             .apply()
     }
@@ -389,6 +435,24 @@ class EqualizerManager(
     private fun trebleContributionDb(hz: Int, amountDb: Float): Float {
         val x = ln(hz.coerceIn(1000, 20000).toFloat() / 1000f) / ln(16000f / 1000f)
         return amountDb * x.coerceIn(0f, 1f)
+    }
+
+    private fun interpolateMeasuredDb(hz: Int, frequencies: List<Int>, gains: List<Float>): Float {
+        if (frequencies.isEmpty() || gains.isEmpty()) return 0f
+        val points = frequencies.zip(gains).sortedBy { it.first }
+        val target = hz.coerceAtLeast(1).toDouble()
+        if (target <= points.first().first) return points.first().second
+        if (target >= points.last().first) return points.last().second
+        for (i in 0 until points.lastIndex) {
+            val (f1, g1) = points[i]
+            val (f2, g2) = points[i + 1]
+            if (target <= f2) {
+                val span = ln(f2.toDouble() / f1.toDouble())
+                val t = if (span == 0.0) 0.0 else ln(target / f1.toDouble()) / span
+                return (g1 + (g2 - g1) * t).toFloat()
+            }
+        }
+        return points.last().second
     }
 
     private fun interpolateCurveDb(hz: Int, curve: FloatArray): Float {

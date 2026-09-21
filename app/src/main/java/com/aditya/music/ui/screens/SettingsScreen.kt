@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -14,6 +16,10 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Brightness1
+import androidx.compose.material.icons.rounded.BluetoothAudio
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +37,10 @@ import com.aditya.music.ui.theme.CardLight
 import com.aditya.music.ui.theme.SurfaceDark
 import com.aditya.music.ui.theme.SurfaceLight
 import com.aditya.music.ui.theme.AdityaIndigo
+import com.aditya.music.data.headset.HeadsetProfile
+import com.aditya.music.data.headset.HeadsetProfile.Companion.TYPE_EARBUDS
+import com.aditya.music.data.headset.HeadsetProfile.Companion.TYPE_HEADPHONES
+import com.aditya.music.data.headset.HeadsetProfile.Companion.TYPE_NECKBAND
 import com.aditya.music.ui.viewmodel.MusicViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,6 +51,9 @@ fun SettingsScreen(
 ) {
     val themeMode by viewModel.themeMode.collectAsState()
     var showThemePicker by remember { mutableStateOf(false) }
+    var showHeadsetPicker by remember { mutableStateOf(false) }
+    val selectedHeadset by viewModel.selectedHeadsetProfile.collectAsState()
+    val selectedHeadsetType by viewModel.selectedHeadsetType.collectAsState()
 
     Scaffold(
         topBar = {
@@ -101,6 +114,41 @@ fun SettingsScreen(
                         }
                     )
                 }
+
+                Spacer(Modifier.height(10.dp))
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showHeadsetPicker = true },
+                    shape = RoundedCornerShape(18.dp)
+                ) {
+                    ListItem(
+                        leadingContent = {
+                            Icon(
+                                Icons.Rounded.Headphones,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        headlineContent = {
+                            Text("Set your headset", fontWeight = FontWeight.SemiBold)
+                        },
+                        supportingContent = {
+                            Text(
+                                selectedHeadset?.name
+                                    ?: selectedHeadsetTypeLabel(selectedHeadsetType)
+                            )
+                        },
+                        trailingContent = {
+                            Icon(
+                                Icons.Rounded.BluetoothAudio,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    )
+                }
             }
 
             Divider()
@@ -155,6 +203,202 @@ fun SettingsScreen(
             onDismiss = { showThemePicker = false }
         )
     }
+
+    if (showHeadsetPicker) {
+        HeadsetSetupDialog(
+            profiles = viewModel.headsetProfiles.collectAsState().value,
+            currentProfile = selectedHeadset,
+            currentType = selectedHeadsetType,
+            onTypeSelected = viewModel::saveHeadsetType,
+            onProfileSelected = viewModel::saveHeadsetProfile,
+            onClear = viewModel::clearHeadsetProfile,
+            onDismiss = { showHeadsetPicker = false }
+        )
+    }
+}
+
+@Composable
+private fun HeadsetSetupDialog(
+    profiles: List<HeadsetProfile>,
+    currentProfile: HeadsetProfile?,
+    currentType: String?,
+    onTypeSelected: (String) -> Unit,
+    onProfileSelected: (HeadsetProfile) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var step by remember(currentProfile?.id, currentType) {
+        mutableIntStateOf(if (currentType == null) 0 else 1)
+    }
+    var type by remember(currentType) { mutableStateOf(currentType) }
+    var query by remember { mutableStateOf("") }
+    var selected by remember(currentProfile) { mutableStateOf(currentProfile) }
+
+    val filtered = remember(profiles, type, query) {
+        profiles
+            .asSequence()
+            .filter { profile ->
+                when (type) {
+                    TYPE_HEADPHONES -> profile.type == "headphones"
+                    TYPE_EARBUDS -> profile.type == "earbuds"
+                    TYPE_NECKBAND -> profile.type == "earbuds"
+                    else -> true
+                }
+            }
+            .filter { it.matches(query) }
+            .take(80)
+            .toList()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("Set your headset", fontWeight = FontWeight.Bold)
+                Text(
+                    if (step == 0) "Choose the device type" else "Choose an offline measured model",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        text = {
+            if (step == 0) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    HeadsetTypeCard("Earbuds", "In-ear / true wireless", Icons.Rounded.BluetoothAudio, type == TYPE_EARBUDS) {
+                        type = TYPE_EARBUDS
+                    }
+                    HeadsetTypeCard("Neckband", "Wireless band with in-ear drivers", Icons.Rounded.BluetoothAudio, type == TYPE_NECKBAND) {
+                        type = TYPE_NECKBAND
+                    }
+                    HeadsetTypeCard("Headphones", "On-ear / over-ear", Icons.Rounded.Headphones, type == TYPE_HEADPHONES) {
+                        type = TYPE_HEADPHONES
+                    }
+                    Text(
+                        "Model matching uses measured profiles only. Selecting a type alone does not invent an EQ curve; it keeps the source unchanged until a measured model is selected.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Column {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        leadingIcon = { Icon(Icons.Rounded.Search, null) },
+                        placeholder = { Text("Search brand or model") },
+                        label = { Text("Headset model") }
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    if (filtered.isEmpty()) {
+                        Text(
+                            "No measured offline profile found. Try another model or use Skip.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 330.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(filtered, key = { it.id }) { profile ->
+                                val isSelected = selected?.id == profile.id
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().clickable { selected = profile },
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(profile.name, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                                            Text(
+                                                "Measured profile • ${profile.source}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (isSelected) Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "${profiles.size} offline profiles available in this build",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                if (step == 0) onDismiss()
+                else { type = null; selected = null; onClear(); onDismiss() }
+            }) {
+                Text(if (step == 0) "Skip" else "Clear")
+            }
+        },
+        confirmButton = {
+            if (step == 0) {
+                Button(
+                    enabled = type != null,
+                    onClick = {
+                        type?.let(onTypeSelected)
+                        step = 1
+                    }
+                ) { Text("Next") }
+            } else {
+                Button(
+                    enabled = selected != null,
+                    onClick = {
+                        selected?.let(onProfileSelected)
+                        onDismiss()
+                    }
+                ) { Text("Save") }
+            }
+        }
+    )
+}
+
+@Composable
+private fun HeadsetTypeCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        ListItem(
+            leadingContent = { Icon(icon, null) },
+            headlineContent = { Text(title, fontWeight = FontWeight.SemiBold) },
+            supportingContent = { Text(subtitle) },
+            trailingContent = { if (selected) Icon(Icons.Rounded.CheckCircle, null, tint = MaterialTheme.colorScheme.primary) }
+        )
+    }
+}
+
+private fun selectedHeadsetTypeLabel(type: String?): String = when (type) {
+    TYPE_EARBUDS -> "Earbuds selected — choose a measured model"
+    TYPE_NECKBAND -> "Neckband selected — choose a measured model"
+    TYPE_HEADPHONES -> "Headphones selected — choose a measured model"
+    else -> "Choose earbuds, neckband or headphones"
 }
 
 @Composable

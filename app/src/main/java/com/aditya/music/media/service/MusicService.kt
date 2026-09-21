@@ -3,17 +3,19 @@ package com.aditya.music.media.service
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import com.aditya.music.MainActivity
 import com.aditya.music.R
+import com.aditya.music.data.headset.HeadsetProfile
 import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerManager
 import org.json.JSONArray
@@ -22,9 +24,8 @@ import org.json.JSONObject
 /**
  * Long-lived playback service for Aditya Music.
  *
- * The service intentionally delegates notification rendering to Media3's native provider. This
- * keeps the Android media controls and the MediaSession in one source of truth, including the
- * position/duration state used by supported System UI seek controls.
+ * The service keeps playback state in MediaSession/ExoPlayer and uses a progress-aware Media3
+ * notification provider. The same session remains the source of truth for supported System UI seek controls.
  */
 @UnstableApi
 class MusicService : MediaLibraryService() {
@@ -40,14 +41,22 @@ class MusicService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private var equalizerManager: EqualizerManager? = null
     private var restoringState = false
+    private val notificationHandler = Handler(Looper.getMainLooper())
+
+    private val notificationTicker = object : Runnable {
+        override fun run() {
+            val session = mediaSession
+            val currentPlayer = player
+            if (session != null && currentPlayer != null) {
+                onUpdateNotification(session, currentPlayer.isPlaying)
+                if (currentPlayer.isPlaying) notificationHandler.postDelayed(this, 1000L)
+            }
+        }
+    }
 
     private val playerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             rebuildEqualizer(audioSessionId)
-        }
-
-        override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-            persistPlaybackState()
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -64,6 +73,12 @@ class MusicService : MediaLibraryService() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             persistPlaybackState()
+            refreshNotificationTicker()
+        }
+
+        override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+            persistPlaybackState()
+            refreshNotificationTicker()
         }
     }
 
@@ -102,13 +117,10 @@ class MusicService : MediaLibraryService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // Media3 owns the media notification so the session's playback state/commands remain
-        // synchronized with the notification and System UI. Android 13+ specifically populates
-        // its media control from MediaSession data.
-        DefaultMediaNotificationProvider(this).also { provider ->
-            provider.setSmallIcon(R.drawable.ic_notification_aditya)
-            setMediaNotificationProvider(provider)
-        }
+        // The custom provider adds an informational progress bar + elapsed/total text for
+        // notification surfaces that support it. The same MediaSession is still the source of
+        // truth for Android 11+ interactive System UI seeking.
+        setMediaNotificationProvider(ProgressMediaNotificationProvider(this))
 
         mediaSession = MediaLibrarySession.Builder(
             this,
@@ -117,6 +129,7 @@ class MusicService : MediaLibraryService() {
         )
             .setSessionActivity(sessionActivity)
             .build()
+
     }
 
     private fun persistPlaybackState() {
@@ -135,6 +148,7 @@ class MusicService : MediaLibraryService() {
                     put("title", metadata.title?.toString() ?: "")
                     put("artist", metadata.artist?.toString() ?: "")
                     put("album", metadata.albumTitle?.toString() ?: "")
+                    put("artwork", metadata.artworkUri?.toString() ?: "")
                     put("duration", currentPlayer.duration.takeIf { it > 0L } ?: 0L)
                 })
             }
@@ -167,6 +181,7 @@ class MusicService : MediaLibraryService() {
                             .setTitle(obj.optString("title"))
                             .setArtist(obj.optString("artist"))
                             .setAlbumTitle(obj.optString("album"))
+                            .setArtworkUri(obj.optString("artwork").takeIf { it.isNotBlank() }?.let(Uri::parse))
                             .build()
                     )
                     .build()
@@ -201,6 +216,14 @@ class MusicService : MediaLibraryService() {
         runCatching {
             EqualizerManager(this, audioSessionId)
         }.onSuccess { manager ->
+            val headsetPrefs = getSharedPreferences("aditya_music_headset", MODE_PRIVATE)
+            if (headsetPrefs.getBoolean("apply_pending", false)) {
+                headsetPrefs.getString("profile", null)
+                    ?.let { raw -> runCatching { JSONObject(raw) }.getOrNull() }
+                    ?.let { HeadsetProfile.fromJson(it) }
+                    ?.let(manager::applyHeadsetProfile)
+                headsetPrefs.edit().putBoolean("apply_pending", false).apply()
+            }
             equalizerManager = manager
             EqualizerController.attach(manager)
         }.onFailure {
@@ -213,7 +236,20 @@ class MusicService : MediaLibraryService() {
         return mediaSession
     }
 
+    private fun refreshNotificationTicker() {
+        notificationHandler.removeCallbacks(notificationTicker)
+        mediaSession?.let { session ->
+            player?.let { currentPlayer ->
+                onUpdateNotification(session, currentPlayer.isPlaying)
+                if (currentPlayer.isPlaying) {
+                    notificationHandler.postDelayed(notificationTicker, 1000L)
+                }
+            }
+        }
+    }
+
     override fun onDestroy() {
+        notificationHandler.removeCallbacks(notificationTicker)
         EqualizerController.detach(equalizerManager)
         equalizerManager?.release()
         equalizerManager = null

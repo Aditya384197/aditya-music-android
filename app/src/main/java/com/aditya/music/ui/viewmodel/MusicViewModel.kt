@@ -4,12 +4,13 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import com.aditya.music.data.database.MusicDatabase
+import com.aditya.music.data.headset.HeadsetProfile
+import com.aditya.music.data.headset.HeadsetProfileStore
 import com.aditya.music.data.model.Album
 import com.aditya.music.data.model.Artist
 import com.aditya.music.data.model.Playlist
@@ -17,6 +18,7 @@ import com.aditya.music.data.model.Song
 import com.aditya.music.data.repository.MusicRepository
 import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
@@ -59,6 +61,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 .setTitle(song.title)
                 .setArtist(song.artist)
                 .setAlbumTitle(song.album)
+                .setArtworkUri(song.albumArtUri)
                 .build()
         )
         .build()
@@ -81,6 +84,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     val equalizerState: StateFlow<EqualizerState> = EqualizerController.state
+
+    private val headsetPrefs = application.getSharedPreferences("aditya_music_headset", Application.MODE_PRIVATE)
+    private val _headsetProfiles = MutableStateFlow<List<HeadsetProfile>>(emptyList())
+    val headsetProfiles: StateFlow<List<HeadsetProfile>> = _headsetProfiles.asStateFlow()
+    private val _selectedHeadsetProfile = MutableStateFlow<HeadsetProfile?>(null)
+    val selectedHeadsetProfile: StateFlow<HeadsetProfile?> = _selectedHeadsetProfile.asStateFlow()
+    private val _selectedHeadsetType = MutableStateFlow<String?>(headsetPrefs.getString("type", null))
+    val selectedHeadsetType: StateFlow<String?> = _selectedHeadsetType.asStateFlow()
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            _headsetProfiles.value = HeadsetProfileStore.load(application)
+            val saved = headsetPrefs.getString("profile", null)
+            if (!saved.isNullOrBlank()) {
+                runCatching { org.json.JSONObject(saved) }
+                    .getOrNull()
+                    ?.let { HeadsetProfile.fromJson(it) }
+                    ?.let { _selectedHeadsetProfile.value = it }
+            }
+        }
+    }
 
     private val _openNowPlayingEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val openNowPlayingEvents = _openNowPlayingEvents.asSharedFlow()
@@ -425,6 +449,28 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setEqualizerBand(index: Int, levelMb: Int) = EqualizerController.setBandLevel(index, levelMb)
 
     fun resetEqualizer() = EqualizerController.reset()
+
+    fun saveHeadsetType(type: String) {
+        _selectedHeadsetType.value = type
+        headsetPrefs.edit().putString("type", type).apply()
+    }
+
+    fun saveHeadsetProfile(profile: HeadsetProfile) {
+        _selectedHeadsetProfile.value = profile
+        headsetPrefs.edit()
+            .putString("profile", profile.toJson().toString())
+            .putBoolean("apply_pending", true)
+            .apply()
+        EqualizerController.applyHeadsetProfile(profile)
+        headsetPrefs.edit().putBoolean("apply_pending", false).apply()
+    }
+
+    fun clearHeadsetProfile() {
+        _selectedHeadsetProfile.value = null
+        _selectedHeadsetType.value = null
+        headsetPrefs.edit().remove("profile").remove("type").remove("apply_pending").apply()
+        EqualizerController.reset()
+    }
 
     fun dismissPlayer() {
         mediaController?.clearMediaItems()
