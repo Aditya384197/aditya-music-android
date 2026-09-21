@@ -294,6 +294,40 @@ class EqualizerManager(
         persist()
     }
 
+    /** Apply a measured headset correction profile to the current audio session. */
+    fun applyHeadsetProfile(profile: HeadsetProfile) {
+        if (!supported || profile.frequenciesHz.isEmpty() || profile.frequenciesHz.size != profile.gainsDb.size) {
+            return
+        }
+
+        headsetProfile = profile
+        headsetProfileActive = true
+        preset = PRESET_HEADSET
+        bassDb = 0f
+        midDb = 0f
+        trebleDb = 0f
+        enabled = true
+
+        val safeRange = safeBandLevelRange()
+        for (index in bandFrequenciesHzInternal.indices) {
+            val measuredDb = interpolateMeasuredDb(
+                bandFrequenciesHzInternal[index],
+                profile.frequenciesHz,
+                profile.gainsDb
+            )
+            // AutoEq's fixed-band profile includes a negative preamp recommendation.
+            // Android's legacy Equalizer API has no independent preamp control, so fold the
+            // recommended preamp into each band to avoid clipping while preserving the curve.
+            baseBandLevelsMbInternal[index] = (dbToMillibel(measuredDb + profile.preampDb).toInt())
+                .coerceIn(safeRange.first, safeRange.second)
+                .toShort()
+        }
+
+        applyAllBandLevels()
+        applyEnabledState()
+        persist()
+    }
+
     fun reset() {
         baseBandLevelsMbInternal.indices.forEach { index ->
             baseBandLevelsMbInternal[index] = 0

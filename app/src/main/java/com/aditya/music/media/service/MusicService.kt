@@ -221,7 +221,7 @@ class MusicService : MediaLibraryService() {
                 headsetPrefs.getString("profile", null)
                     ?.let { raw -> runCatching { JSONObject(raw) }.getOrNull() }
                     ?.let { HeadsetProfile.fromJson(it) }
-                    ?.let(manager::applyHeadsetProfile)
+                    ?.let { profile -> manager.applyHeadsetProfile(profile) }
                 headsetPrefs.edit().putBoolean("apply_pending", false).apply()
             }
             equalizerManager = manager
