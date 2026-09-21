@@ -151,11 +151,6 @@ fun HomeScreen(
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold
                                 )
-                                Text(
-                                    "My Music",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
                             }
                         }
                     },
@@ -195,52 +190,6 @@ fun HomeScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 7.dp)
                     ) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            tonalElevation = 1.dp
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 13.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Rounded.LibraryMusic,
-                                    null,
-                                    Modifier.size(23.dp),
-                                    MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(Modifier.width(9.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("My Music", fontWeight = FontWeight.Bold)
-                                    Text(
-                                        "${songs.size} ${if (songs.size == 1) "song" else "songs"}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                FilledTonalIconButton(
-                                    onClick = { if (orderedSongs.isNotEmpty()) viewModel.playSongs(orderedSongs, 0) },
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Icon(Icons.Rounded.PlayArrow, "Play all")
-                                }
-                                IconButton(
-                                    onClick = {
-                                        if (orderedSongs.isNotEmpty()) viewModel.playSongs(orderedSongs.shuffled(), 0)
-                                    },
-                                    modifier = Modifier.size(40.dp)
-                                ) {
-                                    Icon(Icons.Rounded.Shuffle, "Shuffle all")
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(7.dp))
-
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = viewModel::setSearchQuery,
@@ -352,21 +301,9 @@ fun HomeScreen(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp, bottom = 110.dp),
+                        contentPadding = PaddingValues(start = 10.dp, top = 2.dp, end = 10.dp, bottom = 110.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        item {
-                            Text(
-                                when (selectedFilter) {
-                                    HomeFilter.Recent -> "Recently Played"
-                                    HomeFilter.Favorites -> "Favorites"
-                                    else -> "All Music"
-                                },
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp)
-                            )
-                        }
                         itemsIndexed(
                             orderedSongs,
                             key = { _, song -> song.id },

@@ -135,8 +135,7 @@ class MusicService : MediaLibraryService() {
                     put("title", metadata.title?.toString() ?: "")
                     put("artist", metadata.artist?.toString() ?: "")
                     put("album", metadata.albumTitle?.toString() ?: "")
-                    put("art", metadata.artworkUri?.toString() ?: "")
-                    put("duration", metadata.durationMs ?: 0L)
+                    put("duration", currentPlayer.duration.takeIf { it > 0L } ?: 0L)
                 })
             }
             getSharedPreferences(PLAYBACK_STATE_PREFS, MODE_PRIVATE).edit()
@@ -168,14 +167,6 @@ class MusicService : MediaLibraryService() {
                             .setTitle(obj.optString("title"))
                             .setArtist(obj.optString("artist"))
                             .setAlbumTitle(obj.optString("album"))
-                            .setDurationMs(
-                                obj.optLong("duration", 0L).takeIf { it > 0L }
-                            )
-                            .apply {
-                                obj.optString("art")
-                                    .takeIf { it.isNotBlank() }
-                                    ?.let { setArtworkUri(Uri.parse(it)) }
-                            }
                             .build()
                     )
                     .build()

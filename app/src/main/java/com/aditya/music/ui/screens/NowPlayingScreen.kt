@@ -89,19 +89,6 @@ fun NowPlayingScreen(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text(if (isCurrentFavorite) "Remove favorite" else "Add to favorites") },
-                                leadingIcon = {
-                                    Icon(
-                                        if (isCurrentFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                        null
-                                    )
-                                },
-                                onClick = {
-                                    currentSong?.id?.let(viewModel::toggleFavorite)
-                                    showMoreMenu = false
-                                }
-                            )
-                            DropdownMenuItem(
                                 text = {
                                     Text(if (sleepRemainingMs > 0L) "Change sleep timer" else "Sleep timer")
                                 },
@@ -220,31 +207,33 @@ fun NowPlayingScreen(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { viewModel.seekBy(-10_000L) }) {
-                        Icon(Icons.Rounded.Replay10, "Back 10 seconds", Modifier.size(30.dp))
-                    }
-                    IconButton(onClick = { viewModel.playPrevious() }) {
+                    IconButton(
+                        onClick = { viewModel.playPrevious() },
+                        modifier = Modifier.size(54.dp)
+                    ) {
                         Icon(Icons.Rounded.SkipPrevious, "Previous", Modifier.size(34.dp))
                     }
+                    Spacer(Modifier.width(22.dp))
                     FilledIconButton(
                         onClick = { viewModel.togglePlayPause() },
-                        modifier = Modifier.size(68.dp),
+                        modifier = Modifier.size(72.dp),
                         shape = CircleShape
                     ) {
                         Icon(
                             imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                             contentDescription = if (isPlaying) "Pause" else "Play",
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(38.dp)
                         )
                     }
-                    IconButton(onClick = { viewModel.playNext() }) {
+                    Spacer(Modifier.width(22.dp))
+                    IconButton(
+                        onClick = { viewModel.playNext() },
+                        modifier = Modifier.size(54.dp)
+                    ) {
                         Icon(Icons.Rounded.SkipNext, "Next", Modifier.size(34.dp))
-                    }
-                    IconButton(onClick = { viewModel.seekBy(10_000L) }) {
-                        Icon(Icons.Rounded.Forward10, "Forward 10 seconds", Modifier.size(30.dp))
                     }
                 }
 
@@ -253,18 +242,18 @@ fun NowPlayingScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { viewModel.toggleShuffle() }) {
-                        Icon(
-                            Icons.Rounded.Shuffle,
-                            "Shuffle",
-                            tint = if (isShuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     IconButton(onClick = { currentSong?.id?.let(viewModel::toggleFavorite) }) {
                         Icon(
                             if (isCurrentFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                             "Favorite",
                             tint = if (isCurrentFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = { viewModel.toggleShuffle() }) {
+                        Icon(
+                            Icons.Rounded.Shuffle,
+                            "Shuffle",
+                            tint = if (isShuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     IconButton(onClick = { viewModel.toggleRepeat() }) {
