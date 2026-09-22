@@ -1,23 +1,21 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Clean AK Music monogram: bold A + play cut + equalizer accent. -->
     <path
-        android:fillColor="#0B0F19"
-        android:pathData="M0,0h108v108h-108z"/>
-    <!-- Stylized letter 'A' combined with music note and sound waves -->
-    <!-- Left leg of A with soundwave pulse -->
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,18 L28,88 L40,88 L46,70 L62,70 L68,88 L80,88 Z M54,34 L59,58 L49,58 Z" />
+
+    <!-- Play button integrated into the A instead of a separate symbol. -->
     <path
-        android:fillColor="#6366F1"
-        android:pathData="M54,20 L30,84 L40,84 L48,62 L60,62 L68,84 L78,84 Z M54,36 L58,54 L50,54 Z"/>
-    <!-- Inner musical note stem & head -->
+        android:fillColor="#7C3AED"
+        android:pathData="M58,42 L58,62 L75,52 Z" />
+
+    <!-- Small equalizer bars give the mark a music identity at icon size. -->
     <path
-        android:fillColor="#EC4899"
-        android:pathData="M54,46 L64,42 L64,68 A8,8 0 1,1 56,60 L56,48 Z"/>
-    <!-- Play pulse circle -->
-    <path
-        android:fillColor="#F59E0B"
-        android:pathData="M78,54 L68,48 L68,60 Z"/>
+        android:fillColor="#22D3EE"
+        android:pathData="M78,70h6v12h-6z M87,62h6v20h-6z M96,74h6v8h-6z" />
 </vector>

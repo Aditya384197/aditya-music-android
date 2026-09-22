@@ -138,7 +138,7 @@ class MusicService : MediaLibraryService() {
                     if (notificationController != null && notificationController == controller) {
                         session.setAvailableCommands(
                             controller,
-                            androidx.media3.session.SessionCommands.Builder().addAllCommands().build(),
+                            androidx.media3.session.SessionCommands.Builder().build(),
                             Player.Commands.Builder()
                                 .addAllCommands()
                                 .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
