@@ -46,6 +46,7 @@ fun HomeScreen(
     val recentlyPlayed by viewModel.recentlyPlayedSongs.collectAsState()
     val favorites by viewModel.favoriteSongs.collectAsState()
     val albums by viewModel.albums.collectAsState()
+    val currentSong by viewModel.currentSong.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val context = LocalContext.current

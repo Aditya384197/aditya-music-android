@@ -1,7 +1,7 @@
 package com.aditya.music.ui.viewmodel
 
 import android.app.Application
-import android.content.ContentObserver
+import android.database.ContentObserver
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -528,7 +528,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         libraryRefreshJob?.cancel()
-        application.contentResolver.unregisterContentObserver(mediaStoreObserver)
+        getApplication<Application>().contentResolver.unregisterContentObserver(mediaStoreObserver)
         tickerJob?.cancel()
         sleepTimerJob?.cancel()
         super.onCleared()

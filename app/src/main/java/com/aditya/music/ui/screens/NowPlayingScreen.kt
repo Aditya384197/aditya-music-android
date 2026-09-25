@@ -10,7 +10,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -31,7 +35,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -439,7 +442,6 @@ private fun LogoHeroCard(
                 var totalDrag = 0f
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { change, dragAmount ->
-                        change.consume()
                         totalDrag += dragAmount
                         swipeOffset = totalDrag.coerceIn(-swipeThresholdPx * 1.25f, swipeThresholdPx * 1.25f)
                     },
@@ -694,7 +696,7 @@ private fun VerticalBandSlider(
                 .height(trackHeight)
                 .draggable(
                     enabled = enabled,
-                    orientation = androidx.compose.foundation.gestures.Orientation.Vertical,
+                    orientation = Orientation.Vertical,
                     state = rememberDraggableState { delta ->
                         val next = (dragValue - (delta / dragHeightPx) * span)
                             .coerceIn(minMb.toFloat(), maxMb.toFloat())
