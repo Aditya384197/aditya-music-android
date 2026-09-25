@@ -105,14 +105,13 @@ fun HomeScreen(
                 it.album.contains(query, ignoreCase = true)
         }
 
-        if (selectedFilter == null) {
-            val recentOrder = recentlyPlayed.mapIndexed { index, song -> song.id to index }.toMap()
-            base.sortedWith(
-                compareBy<Song> { if (it.id == currentSong?.id) 0 else 1 }
-                    .thenBy { recentOrder[it.id] ?: Int.MAX_VALUE }
+        when (selectedFilter) {
+            null -> base.sortedWith(
+                compareByDescending<Song> { it.dateAdded }
                     .thenBy { it.title.lowercase() }
             )
-        } else base
+            else -> base
+        }
     }
 
     Scaffold(

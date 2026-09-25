@@ -1,8 +1,12 @@
 package com.aditya.music.ui.viewmodel
 
 import android.app.Application
+import android.content.ContentObserver
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -35,6 +39,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var mediaController: MediaController? = null
     private var tickerJob: Job? = null
     private var sleepTimerJob: Job? = null
+    private var libraryRefreshJob: Job? = null
     private val _sleepTimerRemainingMs = MutableStateFlow(0L)
     val sleepTimerRemainingMs: StateFlow<Long> = _sleepTimerRemainingMs.asStateFlow()
 
@@ -94,6 +99,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedHeadsetType = MutableStateFlow<String?>(headsetPrefs.getString("type", null))
     val selectedHeadsetType: StateFlow<String?> = _selectedHeadsetType.asStateFlow()
 
+    private val mediaStoreObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean, uri: Uri?) {
+            if (!hasPermission.value) return
+            libraryRefreshJob?.cancel()
+            libraryRefreshJob = viewModelScope.launch {
+                delay(450L)
+                refreshLibrary()
+            }
+        }
+    }
+
+    private fun audioCollectionUri(): Uri =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        }
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             _headsetProfiles.value = HeadsetProfileStore.load(application)
@@ -105,6 +128,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     ?.let { _selectedHeadsetProfile.value = it }
             }
         }
+
+        // Keep the library current when another app/file manager downloads or copies music.
+        // Changes are debounced so a multi-file download triggers one lightweight rescan.
+        getApplication<Application>().contentResolver.registerContentObserver(
+            audioCollectionUri(),
+            true,
+            mediaStoreObserver
+        )
     }
 
     private val _openNowPlayingEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -114,19 +145,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val filteredSongs: StateFlow<List<Song>> = combine(
-        allSongs, searchQuery, repository.songIdsByPlayCount
-    ) { songs, query, playOrder ->
-        val rankMap = playOrder.withIndex().associate { (index, songId) ->
-            songId to playOrder.size - index
-        }
+        allSongs, searchQuery
+    ) { songs, query ->
         val base = if (query.isBlank()) songs
         else songs.filter {
             it.title.contains(query, ignoreCase = true) ||
                 it.artist.contains(query, ignoreCase = true) ||
                 it.album.contains(query, ignoreCase = true)
         }
+        // Library order is download/import order: newest MediaStore additions first.
+        // Playback history must never reorder the main song library.
         base.sortedWith(
-            compareByDescending<Song> { rankMap[it.id] ?: 0 }
+            compareByDescending<Song> { it.dateAdded }
                 .thenBy { it.title.lowercase() }
         )
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
@@ -380,6 +410,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playNext() = mediaController?.seekToNextMediaItem()
 
+    /** Previous-track action used by the artwork swipe gesture; unlike the button behaviour,
+     * it always asks the session for the previous queue item rather than restarting the current song. */
+    fun playPreviousTrack() = mediaController?.seekToPreviousMediaItem()
+
     fun playPrevious() {
         mediaController?.let { controller ->
             if (controller.currentPosition > 3000) controller.seekTo(0L)
@@ -551,5 +585,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        libraryRefreshJob?.cancel()
+        tickerJob?.cancel()
+        sleepTimerJob?.cancel()
+        runCatching {
+            getApplication<Application>().contentResolver.unregisterContentObserver(mediaStoreObserver)
+        }
+        mediaController?.let { controller ->
+            runCatching { controller.release() }
+        }
+        mediaController = null
+        super.onCleared()
     }
 }

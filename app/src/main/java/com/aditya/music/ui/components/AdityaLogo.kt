@@ -4,50 +4,28 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.PathNode
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.geometry.Offset
+import com.aditya.music.R
 
-private val AdityaLogoVector: ImageVector by lazy {
-    ImageVector.Builder(
-        name = "AdityaLogo",
-        defaultWidth = 48.dp, defaultHeight = 48.dp,
-        viewportWidth = 100f, viewportHeight = 100f
-    ).apply {
-        addPath(
-            pathData = listOf(
-                PathNode.MoveTo(50f, 12f), PathNode.LineTo(18f, 88f),
-                PathNode.LineTo(32f, 88f), PathNode.LineTo(42f, 62f),
-                PathNode.LineTo(58f, 62f), PathNode.LineTo(68f, 88f),
-                PathNode.LineTo(82f, 88f), PathNode.Close,
-                PathNode.MoveTo(50f, 32f), PathNode.LineTo(55f, 52f),
-                PathNode.LineTo(45f, 52f), PathNode.Close
-            ),
-            fill = Brush.linearGradient(
-                colors = listOf(Color(0xFF6366F1), Color(0xFFEC4899)),
-                start = Offset(0f, 0f), end = Offset(100f, 100f)
-            )
-        )
-        addPath(
-            pathData = listOf(
-                PathNode.MoveTo(64f, 45f),
-                PathNode.CurveTo(64f, 40.6f, 67.6f, 37f, 72f, 37f),
-                PathNode.CurveTo(76.4f, 37f, 80f, 40.6f, 80f, 45f),
-                PathNode.CurveTo(80f, 49.4f, 76.4f, 53f, 72f, 53f),
-                PathNode.CurveTo(67.6f, 53f, 64f, 49.4f, 64f, 45f),
-                PathNode.Close
-            ),
-            fill = SolidColor(Color(0xFFF59E0B))
-        )
-    }.build()
-}
-
+/**
+ * Single source for the Music app mark.
+ *
+ * The supplied production logo is used everywhere this component appears so the launcher,
+ * artwork fallback, home rows and player surface no longer mix the old vector mark with the
+ * new Music identity.
+ */
 @Composable
-fun AdityaLogo(modifier: Modifier = Modifier, size: Dp = 48.dp) {
-    Image(imageVector = AdityaLogoVector, contentDescription = null, modifier = modifier.size(size))
+fun AdityaLogo(
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp
+) {
+    Image(
+        painter = painterResource(R.drawable.music_logo),
+        contentDescription = null,
+        modifier = modifier.size(size),
+        contentScale = ContentScale.Fit
+    )
 }
