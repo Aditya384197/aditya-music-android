@@ -46,7 +46,6 @@ fun HomeScreen(
     val recentlyPlayed by viewModel.recentlyPlayedSongs.collectAsState()
     val favorites by viewModel.favoriteSongs.collectAsState()
     val albums by viewModel.albums.collectAsState()
-    val currentSong by viewModel.currentSong.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
     val context = LocalContext.current
@@ -96,7 +95,7 @@ fun HomeScreen(
     }
 
     val orderedSongs = remember(
-        songs, recentlyPlayed, favorites, currentSong?.id, selectedFilter, searchQuery
+        songs, recentlyPlayed, favorites, selectedFilter, searchQuery
     ) {
         val query = searchQuery.trim()
         val base = if (query.isBlank()) filterSongs else filterSongs.filter {
@@ -105,13 +104,12 @@ fun HomeScreen(
                 it.album.contains(query, ignoreCase = true)
         }
 
-        when (selectedFilter) {
-            null -> base.sortedWith(
+        if (selectedFilter == null) {
+            base.sortedWith(
                 compareByDescending<Song> { it.dateAdded }
-                    .thenBy { it.title.lowercase() }
+                    .thenByDescending { it.id }
             )
-            else -> base
-        }
+        } else base
     }
 
     Scaffold(

@@ -116,7 +116,7 @@ class MusicService : MediaLibraryService() {
                     // controller, including COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM. This is what
                     // allows the legacy lock-screen MediaStyle surface to seek the actual player.
                     val playerCommands = Player.Commands.Builder()
-                        .addAllCommands()
+                        .addAll(MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS)
                         .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
                         .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
                         .build()
@@ -136,14 +136,15 @@ class MusicService : MediaLibraryService() {
                     // genuinely draggable instead of being a decorative progress line.
                     val notificationController = session.getMediaNotificationControllerInfo()
                     if (notificationController != null && notificationController == controller) {
+                        val availablePlayerCommands = Player.Commands.Builder()
+                            .addAll(session.player.availableCommands)
+                            .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
+                            .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
+                            .build()
                         session.setAvailableCommands(
                             controller,
-                            androidx.media3.session.SessionCommands.Builder().build(),
-                            Player.Commands.Builder()
-                                .addAllCommands()
-                                .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)
-                                .add(Player.COMMAND_SEEK_TO_MEDIA_ITEM)
-                                .build()
+                            MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS,
+                            availablePlayerCommands
                         )
                     }
                 }

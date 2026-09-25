@@ -10,18 +10,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aditya.music.R
 
-/**
- * Single source for the Music app mark.
- *
- * The supplied production logo is used everywhere this component appears so the launcher,
- * artwork fallback, home rows and player surface no longer mix the old vector mark with the
- * new Music identity.
- */
 @Composable
-fun AdityaLogo(
-    modifier: Modifier = Modifier,
-    size: Dp = 48.dp
-) {
+fun AdityaLogo(modifier: Modifier = Modifier, size: Dp = 48.dp) {
     Image(
         painter = painterResource(R.drawable.music_logo),
         contentDescription = null,
