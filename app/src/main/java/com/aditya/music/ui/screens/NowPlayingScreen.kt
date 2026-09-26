@@ -1,6 +1,7 @@
 package com.aditya.music.ui.screens
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -30,7 +31,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -151,7 +155,7 @@ fun NowPlayingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp)
+                            .sizeIn(maxWidth = 356.dp, maxHeight = 356.dp)
                     )
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -321,43 +325,161 @@ fun NowPlayingScreen(
 }
 
 /**
- * Slow-rotating ambient glow behind the whole Now Playing page. Purely decorative (low alpha,
- * ~20s per rotation) so it never distracts from the artwork or competes for attention with the
- * controls sitting on top of it.
+ * Ambient glow behind the whole Now Playing page - decorative and low-alpha so it never
+ * competes with the artwork or controls sitting on top of it. Rather than one single repeating
+ * pattern, this slowly drifts through a handful of different looks (a rotating sweep, a soft
+ * breathing glow, a wandering pair of blobs, a gentle diagonal wash) and cross-fades between them
+ * so gradually that the switch itself is never noticeable - only that the background is always
+ * quietly alive.
  */
 @Composable
 private fun AmbientAnimatedBackground(modifier: Modifier = Modifier) {
     val infinite = rememberInfiniteTransition(label = "ambientBg")
-    val angle by infinite.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(22_000, easing = LinearEasing)),
-        label = "angle"
+
+    // Continuous motions that keep running no matter which scene is currently showing, so a
+    // scene never looks "reset" the moment it fades back in.
+    val rotation by infinite.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(26_000, easing = LinearEasing)),
+        label = "rotation"
     )
+    val pulse by infinite.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(7_000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "pulse"
+    )
+    val wander by infinite.animateFloat(
+        initialValue = 0f, targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(19_000, easing = LinearEasing)),
+        label = "wander"
+    )
+    // Which scene is showing, as a continuous position: sceneIndex.fraction. A whole loop
+    // through every scene takes sceneCount * secondsPerScene, and it's a perfect loop (ends
+    // exactly where it started) so the restart is invisible too.
+    val sceneCount = 4
+    val secondsPerScene = 24_000
+    val scenePosition by infinite.animateFloat(
+        initialValue = 0f, targetValue = sceneCount.toFloat(),
+        animationSpec = infiniteRepeatable(tween(secondsPerScene * sceneCount, easing = LinearEasing)),
+        label = "scenePosition"
+    )
+
     val primary = MaterialTheme.colorScheme.primary
     val secondary = MaterialTheme.colorScheme.secondary
     val tertiary = MaterialTheme.colorScheme.tertiary
     val background = MaterialTheme.colorScheme.background
 
     Box(modifier = modifier.background(background)) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize(1.6f)
-                .align(Alignment.Center)
-                .graphicsLayer { rotationZ = angle }
-                .background(
-                    Brush.sweepGradient(
-                        listOf(
-                            primary.copy(alpha = 0.20f),
-                            tertiary.copy(alpha = 0.14f),
-                            secondary.copy(alpha = 0.16f),
-                            background.copy(alpha = 0f),
-                            primary.copy(alpha = 0.20f)
-                        )
-                    )
+        Canvas(modifier = Modifier.matchParentSize()) {
+            val sceneIndex = scenePosition.toInt().coerceIn(0, sceneCount - 1)
+            val nextIndex = (sceneIndex + 1) % sceneCount
+            val localT = scenePosition - sceneIndex
+            // Only actually cross-fade during the last third of each scene's turn - the rest of
+            // the time only one scene is drawn at full strength, so there's no visible fade
+            // happening most of the time, just an occasional, very slow hand-off.
+            val blend = ((localT - 0.66f) / 0.34f).coerceIn(0f, 1f)
+
+            drawAmbientScene(sceneIndex, 1f - blend, rotation, pulse, wander, primary, secondary, tertiary, background)
+            drawAmbientScene(nextIndex, blend, rotation, pulse, wander, primary, secondary, tertiary, background)
+        }
+    }
+}
+
+private fun DrawScope.drawAmbientScene(
+    index: Int,
+    alpha: Float,
+    rotation: Float,
+    pulse: Float,
+    wander: Float,
+    primary: Color,
+    secondary: Color,
+    tertiary: Color,
+    background: Color
+) {
+    if (alpha <= 0f) return
+    when (index) {
+        0 -> drawSweepScene(rotation, alpha, primary, secondary, tertiary, background)
+        1 -> drawPulseScene(pulse, alpha, primary, tertiary)
+        2 -> drawWanderScene(wander, alpha, primary, secondary)
+        else -> drawDiagonalScene(wander, alpha, secondary, tertiary)
+    }
+}
+
+private fun DrawScope.drawSweepScene(
+    angleDeg: Float,
+    alpha: Float,
+    primary: Color,
+    secondary: Color,
+    tertiary: Color,
+    background: Color
+) {
+    rotate(angleDeg) {
+        drawRect(
+            brush = Brush.sweepGradient(
+                listOf(
+                    primary.copy(alpha = 0.20f * alpha),
+                    tertiary.copy(alpha = 0.14f * alpha),
+                    secondary.copy(alpha = 0.16f * alpha),
+                    background.copy(alpha = 0f),
+                    primary.copy(alpha = 0.20f * alpha)
                 )
+            ),
+            size = androidx.compose.ui.geometry.Size(size.width * 1.6f, size.height * 1.6f),
+            topLeft = androidx.compose.ui.geometry.Offset(-size.width * 0.3f, -size.height * 0.3f)
         )
     }
+}
+
+private fun DrawScope.drawPulseScene(phase: Float, alpha: Float, primary: Color, tertiary: Color) {
+    val scale = 0.85f + 0.3f * phase
+    drawCircle(
+        brush = Brush.radialGradient(
+            listOf(primary.copy(alpha = 0.22f * alpha), tertiary.copy(alpha = 0.10f * alpha), Color.Transparent),
+            center = center,
+            radius = size.minDimension * 0.7f * scale
+        ),
+        radius = size.minDimension * 0.7f * scale,
+        center = center
+    )
+}
+
+private fun DrawScope.drawWanderScene(angleDeg: Float, alpha: Float, primary: Color, secondary: Color) {
+    val rad1 = Math.toRadians(angleDeg.toDouble())
+    val rad2 = Math.toRadians((angleDeg + 150f).toDouble())
+    val radius = size.minDimension * 0.32f
+    val c1 = androidx.compose.ui.geometry.Offset(
+        (size.width * 0.5f + (kotlin.math.cos(rad1) * size.width * 0.28f)).toFloat(),
+        (size.height * 0.5f + (kotlin.math.sin(rad1) * size.height * 0.22f)).toFloat()
+    )
+    val c2 = androidx.compose.ui.geometry.Offset(
+        (size.width * 0.5f + (kotlin.math.cos(rad2) * size.width * 0.26f)).toFloat(),
+        (size.height * 0.5f + (kotlin.math.sin(rad2) * size.height * 0.24f)).toFloat()
+    )
+    drawCircle(
+        brush = Brush.radialGradient(listOf(primary.copy(alpha = 0.20f * alpha), Color.Transparent), center = c1, radius = radius),
+        radius = radius, center = c1
+    )
+    drawCircle(
+        brush = Brush.radialGradient(listOf(secondary.copy(alpha = 0.18f * alpha), Color.Transparent), center = c2, radius = radius * 0.85f),
+        radius = radius * 0.85f, center = c2
+    )
+}
+
+private fun DrawScope.drawDiagonalScene(angleDeg: Float, alpha: Float, secondary: Color, tertiary: Color) {
+    val t = (kotlin.math.sin(Math.toRadians(angleDeg.toDouble())).toFloat() + 1f) / 2f
+    val start = androidx.compose.ui.geometry.Offset(size.width * (0.1f + 0.2f * t), 0f)
+    val end = androidx.compose.ui.geometry.Offset(size.width * (0.7f - 0.2f * t), size.height)
+    drawRect(
+        brush = Brush.linearGradient(
+            colors = listOf(
+                secondary.copy(alpha = 0.16f * alpha),
+                tertiary.copy(alpha = 0.12f * alpha),
+                Color.Transparent
+            ),
+            start = start,
+            end = end
+        )
+    )
 }
 
 /**
@@ -374,8 +496,8 @@ private fun FloatingArtwork(
 ) {
     val infinite = rememberInfiniteTransition(label = "floatBob")
     val bobOffset by infinite.animateFloat(
-        initialValue = -7f,
-        targetValue = 7f,
+        initialValue = -13f,
+        targetValue = 13f,
         animationSpec = infiniteRepeatable(
             animation = tween(2600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -387,16 +509,17 @@ private fun FloatingArtwork(
     val swipeThresholdPx = with(density) { 90.dp.toPx() }
     var dragAccum by remember { mutableFloatStateOf(0f) }
     val primary = MaterialTheme.colorScheme.primary
+    val cornerShape = RoundedCornerShape(40.dp)
 
     Crossfade(targetState = song.id, label = "artworkCrossfade") {
         Box(
             modifier = modifier
                 .graphicsLayer { translationY = bobOffset }
                 .shadow(
-                    elevation = 26.dp,
-                    shape = RoundedCornerShape(28.dp),
-                    ambientColor = primary.copy(alpha = 0.35f),
-                    spotColor = primary.copy(alpha = 0.45f)
+                    elevation = 30.dp,
+                    shape = cornerShape,
+                    ambientColor = primary.copy(alpha = 0.38f),
+                    spotColor = primary.copy(alpha = 0.5f)
                 )
                 .draggable(
                     orientation = Orientation.Horizontal,
@@ -413,10 +536,10 @@ private fun FloatingArtwork(
             ArtworkView(
                 artworkUri = song.albumArtUri,
                 modifier = Modifier.fillMaxSize(),
-                logoSize = 150.dp,
+                logoSize = 168.dp,
                 imageSizePx = 720,
                 contentDescription = "Album artwork",
-                shape = RoundedCornerShape(28.dp)
+                shape = cornerShape
             )
         }
     }
@@ -594,29 +717,8 @@ private fun VerticalBandSlider(
     enabled: Boolean,
     onValueChange: (Int) -> Unit
 ) {
-    val trackHeight = 178.dp
-    val thumbSize = 22.dp
-    val density = LocalDensity.current
-    val dragHeightPx = with(density) { (trackHeight - thumbSize).toPx().coerceAtLeast(1f) }
-    val span = (maxMb - minMb).coerceAtLeast(1).toFloat()
-
-    // Local drag position, kept separate from `valueMb` while the user is actively dragging.
-    // The value round-trips through the ViewModel and the Android Equalizer before coming back
-    // here as a new `valueMb`; that trip isn't instant, so every recomposition it triggered used
-    // to snap `dragValue` back to a slightly stale number mid-gesture. That's what made the
-    // slider feel like it wouldn't reach the top, got stuck, or jumped into negative values on
-    // its own - the thumb was fighting a value that kept resetting under the user's finger.
-    var dragValue by remember { mutableFloatStateOf(valueMb.toFloat()) }
-    var isDragging by remember { mutableStateOf(false) }
-
-    LaunchedEffect(valueMb) {
-        if (!isDragging) dragValue = valueMb.toFloat()
-    }
-
-    val normalized = ((dragValue - minMb) / span).coerceIn(0f, 1f)
-    val thumbOffset = (trackHeight - thumbSize) * (1f - normalized)
-    val zeroNormalized = ((0 - minMb) / span).coerceIn(0f, 1f)
-    val zeroOffset = (trackHeight - 2.dp) * (1f - zeroNormalized)
+    val trackLength = 178.dp
+    val safeMin = minMb.coerceAtMost(maxMb - 1)
 
     Column(
         modifier = Modifier.width(64.dp),
@@ -630,48 +732,37 @@ private fun VerticalBandSlider(
         )
         Spacer(Modifier.height(7.dp))
 
-        Box(
+        // Same Material3 Slider component used for Bass/Mid/Treble above - just rotated 90
+        // degrees. It already handles drag tracking, clamping and touch physics correctly (that's
+        // why Bass/Mid/Treble never had this problem); a hand-rolled drag gesture for these
+        // vertical bands was what kept getting stuck partway, sticking to the bottom, or refusing
+        // to reach the top. Reusing the same reliable widget fixes it for good instead of trying
+        // to patch the custom math again.
+        Slider(
+            value = valueMb.toFloat().coerceIn(safeMin.toFloat(), maxMb.toFloat()),
+            onValueChange = { onValueChange(it.roundToInt()) },
+            valueRange = safeMin.toFloat()..maxMb.toFloat(),
+            enabled = enabled,
             modifier = Modifier
-                .width(48.dp)
-                .height(trackHeight)
-                .draggable(
-                    enabled = enabled,
-                    orientation = Orientation.Vertical,
-                    onDragStarted = { isDragging = true },
-                    onDragStopped = { isDragging = false },
-                    state = rememberDraggableState { delta ->
-                        val next = (dragValue - (delta / dragHeightPx) * span)
-                            .coerceIn(minMb.toFloat(), maxMb.toFloat())
-                        dragValue = next
-                        onValueChange(next.roundToInt())
+                .width(trackLength)
+                .graphicsLayer {
+                    rotationZ = 270f
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                }
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(
+                        androidx.compose.ui.unit.Constraints(
+                            minWidth = constraints.minHeight,
+                            maxWidth = constraints.maxHeight,
+                            minHeight = constraints.minWidth,
+                            maxHeight = constraints.maxWidth
+                        )
+                    )
+                    layout(placeable.height, placeable.width) {
+                        placeable.place(-placeable.width, 0)
                     }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                Modifier
-                    .width(5.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-            )
-            Box(
-                Modifier
-                    .width(18.dp)
-                    .height(2.dp)
-                    .offset(y = zeroOffset)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.outlineVariant)
-            )
-            Surface(
-                modifier = Modifier
-                    .size(thumbSize)
-                    .offset(y = thumbOffset),
-                shape = CircleShape,
-                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                shadowElevation = if (enabled) 2.dp else 0.dp
-            ) {}
-        }
+                }
+        )
 
         Spacer(Modifier.height(7.dp))
         Text(

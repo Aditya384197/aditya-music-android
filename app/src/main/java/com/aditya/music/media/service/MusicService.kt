@@ -40,6 +40,32 @@ class MusicService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private var equalizerManager: EqualizerManager? = null
     private var restoringState = false
+    private var notificationProvider: ProgressMediaNotificationProvider? = null
+    private val progressTickHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val progressTicker = object : Runnable {
+        override fun run() {
+            val provider = notificationProvider
+            val isPlaying = player?.isPlaying == true
+            if (provider != null && isPlaying) {
+                provider.tick()?.let { notification ->
+                    runCatching {
+                        androidx.core.app.NotificationManagerCompat.from(this@MusicService)
+                            .notify(provider.notificationId, notification)
+                    }
+                }
+                progressTickHandler.postDelayed(this, 1_000L)
+            }
+        }
+    }
+
+    private fun startProgressTicker() {
+        progressTickHandler.removeCallbacks(progressTicker)
+        progressTickHandler.postDelayed(progressTicker, 1_000L)
+    }
+
+    private fun stopProgressTicker() {
+        progressTickHandler.removeCallbacks(progressTicker)
+    }
     private val playerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
             rebuildEqualizer(audioSessionId)
@@ -59,6 +85,7 @@ class MusicService : MediaLibraryService() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             persistPlaybackState()
+            if (isPlaying) startProgressTicker() else stopProgressTicker()
         }
 
         override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
@@ -110,8 +137,11 @@ class MusicService : MediaLibraryService() {
         )
 
         // Keep the notification fully MediaStyle-native so System UI/lock-screen seeking is
-        // connected to the real MediaSession instead of a decorative RemoteViews progress bar.
-        setMediaNotificationProvider(ProgressMediaNotificationProvider(this))
+        // connected to the real MediaSession, with a custom progress-bar/time content view and a
+        // brand-colour tint layered on top of it (see ProgressMediaNotificationProvider).
+        val provider = ProgressMediaNotificationProvider(this)
+        notificationProvider = provider
+        setMediaNotificationProvider(provider)
 
         mediaSession = MediaLibrarySession.Builder(
             this,
@@ -269,6 +299,8 @@ class MusicService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        stopProgressTicker()
+        notificationProvider = null
         EqualizerController.detach(equalizerManager)
         equalizerManager?.release()
         equalizerManager = null
