@@ -208,7 +208,9 @@ class EqualizerManager(
         bassDb = bassDb,
         midDb = midDb,
         trebleDb = trebleDb,
-        bandLevelsMb = bandLevelsMbInternal.toList(),
+        // Expose the user-controlled fine-band value, not the macro-adjusted output.
+        // This keeps the fine slider centered at 0 dB and independent from Bass/Mid/Treble.
+        bandLevelsMb = baseBandLevelsMbInternal.toList(),
         bandFrequenciesHz = bandFrequenciesHzInternal.toList(),
         bandLevelMinMb = bandLevelMinMbInternal,
         bandLevelMaxMb = bandLevelMaxMbInternal,
@@ -282,20 +284,14 @@ class EqualizerManager(
     }
 
     fun setBandLevel(band: Int, level: Short) {
-        if (band !in bandLevelsMbInternal.indices) return
+        if (band !in baseBandLevelsMbInternal.indices) return
         val range = safeBandLevelRange()
-        val requestedFinal = level.toInt().coerceIn(range.first, range.second)
-        val hz = bandFrequenciesHzInternal.getOrElse(band) { 1000 }
-        val toneOffsetDb = bassContributionDb(hz, bassDb) +
-            midContributionDb(hz, midDb) +
-            trebleContributionDb(hz, trebleDb)
-        // Fine-band controls set the ACTUAL band level. Store the inverse of the current
-        // macro tone contribution so changing one band no longer makes the three macro
-        // controls appear to drag that band around unpredictably.
-        baseBandLevelsMbInternal[band] =
-            (requestedFinal - dbToMillibel(toneOffsetDb).toInt())
-                .coerceIn(range.first, range.second)
-                .toShort()
+        // Fine-band controls are the user's independent per-frequency values.
+        // Bass/Mid/Treble are applied later in applyAllBandLevels(), so changing a macro
+        // control cannot move this slider away from its own 0 dB center position.
+        baseBandLevelsMbInternal[band] = level.toInt()
+            .coerceIn(range.first, range.second)
+            .toShort()
         preset = PRESET_CUSTOM
         enabled = supported
         headsetProfileActive = false

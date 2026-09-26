@@ -1,18 +1,12 @@
 package com.aditya.music.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -26,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.consume
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -40,7 +36,6 @@ import com.aditya.music.media.player.PRESET_ROCK
 import com.aditya.music.media.player.PRESET_VOCAL
 import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.viewmodel.MusicViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -69,13 +64,6 @@ fun NowPlayingScreen(
     var swipeDirection by remember { mutableIntStateOf(0) }
     val swipeScope = rememberCoroutineScope()
     val volumeState by viewModel.volumeState.collectAsState()
-
-    LaunchedEffect(currentSong?.id) {
-        if (swipeDirection != 0) {
-            delay(220)
-            swipeDirection = 0
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -149,104 +137,109 @@ fun NowPlayingScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp),
+                        .sizeIn(maxWidth = 360.dp, maxHeight = 360.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     val density = LocalDensity.current
-                    val cardWidthPx = with(density) { maxWidth.toPx() }
-                    var dragOffset by remember(song.id) { mutableFloatStateOf(0f) }
-                    var settleTarget by remember(song.id) { mutableFloatStateOf(0f) }
-                    var pendingSwipe by remember(song.id) { mutableIntStateOf(0) }
-                    val animatedSettle by animateFloatAsState(
-                        targetValue = settleTarget,
-                        animationSpec = tween(180),
-                        label = "player_card_settle",
-                        finishedListener = {
-                            if (pendingSwipe != 0 && settleTarget != 0f) {
-                                val direction = pendingSwipe
-                                pendingSwipe = 0
-                                swipeDirection = direction
-                                if (direction < 0) viewModel.playNext() else viewModel.playPrevious()
-                                val swipedSongId = song.id
-                                swipeScope.launch {
-                                    delay(260)
-                                    if (currentSong?.id == swipedSongId) {
-                                        settleTarget = 0f
-                                        dragOffset = 0f
-                                    }
-                                }
-                            } else {
-                                dragOffset = 0f
-                                settleTarget = 0f
-                            }
-                        }
-                    )
-                    val visualOffset = dragOffset + animatedSettle
-                    val dragState = rememberDraggableState { delta ->
-                        if (pendingSwipe == 0) {
-                            dragOffset = (dragOffset + delta).coerceIn(-cardWidthPx, cardWidthPx)
+                    val cardWidthPx = with(density) { maxWidth.toPx().coerceAtLeast(1f) }
+                    val cardOffset = remember(song.id) { Animatable(0f) }
+
+                    LaunchedEffect(song.id) {
+                        val direction = swipeDirection
+                        if (direction != 0) {
+                            // The new song enters from the side opposite to the outgoing card.
+                            cardOffset.snapTo(if (direction < 0) cardWidthPx else -cardWidthPx)
+                            cardOffset.animateTo(
+                                targetValue = 0f,
+                                animationSpec = tween(170)
+                            )
+                            swipeDirection = 0
+                        } else {
+                            cardOffset.snapTo(0f)
                         }
                     }
 
-                    AnimatedContent(
-                        targetState = song.id,
-                        transitionSpec = {
-                            when (swipeDirection) {
-                                -1 -> slideInHorizontally(animationSpec = tween(180)) { it } togetherWith
-                                    slideOutHorizontally(animationSpec = tween(180)) { -it }
-                                1 -> slideInHorizontally(animationSpec = tween(180)) { -it } togetherWith
-                                    slideOutHorizontally(animationSpec = tween(180)) { it }
-                                else -> androidx.compose.animation.EnterTransition.None togetherWith
-                                    androidx.compose.animation.ExitTransition.None
-                            }
-                        },
-                        label = "player_song_slide"
-                    ) {
-                    Surface(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer {
-                                translationX = visualOffset
-                                rotationZ = (visualOffset / cardWidthPx.coerceAtLeast(1f)) * 2.2f
-                                val scale = 1f - (abs(visualOffset) / cardWidthPx.coerceAtLeast(1f)) * 0.035f
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                            .draggable(
-                                state = dragState,
-                                orientation = Orientation.Horizontal,
-                                onDragStopped = {
-                                    val threshold = cardWidthPx * 0.22f
-                                    if (abs(dragOffset) >= threshold) {
-                                        pendingSwipe = if (dragOffset < 0f) -1 else 1
-                                        settleTarget = (if (pendingSwipe < 0) -cardWidthPx else cardWidthPx) - dragOffset
-                                    } else {
-                                        settleTarget = -dragOffset
+                            .pointerInput(song.id) {
+                                detectHorizontalDragGestures(
+                                    onHorizontalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        if (cardOffset.value != 0f || abs(dragAmount) > 0f) {
+                                            val next = (cardOffset.value + dragAmount)
+                                                .coerceIn(-cardWidthPx, cardWidthPx)
+                                            // Animatable keeps the finger movement directly tied to the card.
+                                            cardOffset.snapTo(next)
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        swipeScope.launch {
+                                            val currentOffset = cardOffset.value
+                                            val threshold = cardWidthPx * 0.20f
+                                            if (abs(currentOffset) >= threshold) {
+                                                val direction = if (currentOffset < 0f) -1 else 1
+                                                val target = if (direction < 0) -cardWidthPx else cardWidthPx
+                                                cardOffset.animateTo(
+                                                    targetValue = target,
+                                                    animationSpec = tween(150)
+                                                )
+                                                swipeDirection = direction
+                                                if (direction < 0) viewModel.playNext()
+                                                else viewModel.playPrevious()
+                                            } else {
+                                                cardOffset.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = tween(170)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        swipeScope.launch {
+                                            cardOffset.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = tween(170)
+                                            )
+                                        }
                                     }
-                                }
-                            ),
-                        shape = RoundedCornerShape(30.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        tonalElevation = 12.dp,
-                        shadowElevation = 18.dp
+                                )
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
+                        Surface(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(
-                                    androidx.compose.ui.graphics.Brush.radialGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                                            MaterialTheme.colorScheme.surfaceVariant,
-                                            MaterialTheme.colorScheme.background
-                                        )
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
+                                .graphicsLayer {
+                                    val offset = cardOffset.value
+                                    translationX = offset
+                                    rotationZ = (offset / cardWidthPx) * 1.6f
+                                    val scale = 1f - (abs(offset) / cardWidthPx) * 0.025f
+                                    scaleX = scale
+                                    scaleY = scale
+                                },
+                            shape = RoundedCornerShape(30.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            tonalElevation = 12.dp,
+                            shadowElevation = 18.dp
                         ) {
-                            AdityaLogo(size = 190.dp)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        androidx.compose.ui.graphics.Brush.radialGradient(
+                                            colors = listOf(
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+                                                MaterialTheme.colorScheme.surfaceVariant,
+                                                MaterialTheme.colorScheme.background
+                                            )
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AdityaLogo(size = 220.dp)
+                            }
                         }
-                    }
                     }
                 }
 
@@ -609,17 +602,26 @@ private fun VerticalBandSlider(
     val trackHeight = 178.dp
     val thumbSize = 22.dp
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val dragHeightPx = with(density) { (trackHeight - thumbSize).toPx().coerceAtLeast(1f) }
-    val span = (maxMb - minMb).coerceAtLeast(1).toFloat()
-    var dragValue by remember { mutableFloatStateOf(valueMb.toFloat()) }
+
+    // Keep the usable visual range perfectly symmetric so 0 dB is ALWAYS the exact center.
+    val symmetricAbsMb = minOf(kotlin.math.abs(minMb), kotlin.math.abs(maxMb)).coerceAtLeast(1)
+    val visualMinMb = -symmetricAbsMb
+    val visualMaxMb = symmetricAbsMb
+    val span = (visualMaxMb - visualMinMb).toFloat()
+    val thumbTravelPx = with(density) { (trackHeight - thumbSize).toPx().coerceAtLeast(1f) }
+    val clampedValue = valueMb.coerceIn(visualMinMb, visualMaxMb)
+
+    var dragValue by remember { mutableFloatStateOf(clampedValue.toFloat()) }
     var isDragging by remember { mutableStateOf(false) }
-    LaunchedEffect(valueMb) {
-        if (!isDragging) dragValue = valueMb.toFloat()
+    LaunchedEffect(valueMb, visualMinMb, visualMaxMb) {
+        if (!isDragging) dragValue = clampedValue.toFloat()
     }
-    val normalized = ((dragValue - minMb) / span).coerceIn(0f, 1f)
-    val thumbOffset = (trackHeight - thumbSize) * (1f - normalized)
-    val zeroNormalized = ((0 - minMb) / span).coerceIn(0f, 1f)
-    val zeroOffset = (trackHeight - 2.dp) * (1f - zeroNormalized)
+
+    val normalized = ((dragValue - visualMinMb) / span).coerceIn(0f, 1f)
+    val thumbTopOffset = (trackHeight - thumbSize) * (1f - normalized)
+    val zeroNormalized = ((0f - visualMinMb) / span).coerceIn(0f, 1f)
+    val zeroLineHeight = 2.dp
+    val zeroTopOffset = (trackHeight - zeroLineHeight) * (1f - zeroNormalized)
 
     Column(
         modifier = Modifier.width(64.dp),
@@ -642,20 +644,20 @@ private fun VerticalBandSlider(
                     orientation = Orientation.Vertical,
                     onDragStarted = {
                         isDragging = true
-                        dragValue = valueMb.toFloat()
+                        dragValue = valueMb.coerceIn(visualMinMb, visualMaxMb).toFloat()
                     },
                     onDragStopped = {
                         isDragging = false
-                        dragValue = valueMb.toFloat()
+                        dragValue = valueMb.coerceIn(visualMinMb, visualMaxMb).toFloat()
                     },
                     state = rememberDraggableState { delta ->
-                        val next = (dragValue - (delta / dragHeightPx) * span)
-                            .coerceIn(minMb.toFloat(), maxMb.toFloat())
+                        val next = (dragValue - (delta / thumbTravelPx) * span)
+                            .coerceIn(visualMinMb.toFloat(), visualMaxMb.toFloat())
                         dragValue = next
-                        onValueChange(next.roundToInt())
+                        onValueChange(next.roundToInt().coerceIn(minMb, maxMb))
                     }
                 ),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.TopCenter
         ) {
             Box(
                 Modifier
@@ -664,34 +666,34 @@ private fun VerticalBandSlider(
                     .clip(RoundedCornerShape(4.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             )
+            // The zero/flat marker is exactly in the middle of the track.
             Box(
                 Modifier
-                    .width(18.dp)
-                    .height(2.dp)
-                    .offset(y = zeroOffset)
+                    .width(24.dp)
+                    .height(zeroLineHeight)
+                    .offset(y = zeroTopOffset)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.outlineVariant)
+                    .background(MaterialTheme.colorScheme.outline)
             )
             Surface(
                 modifier = Modifier
                     .size(thumbSize)
-                    .offset(y = thumbOffset),
+                    .offset(y = thumbTopOffset),
                 shape = CircleShape,
                 color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                shadowElevation = if (enabled) 2.dp else 0.dp
+                shadowElevation = if (enabled) 3.dp else 0.dp
             ) {}
         }
 
         Spacer(Modifier.height(7.dp))
         Text(
-            formatGain(valueMb.toShort()),
+            formatGain(dragValue.roundToInt().toShort()),
             style = MaterialTheme.typography.labelSmall,
-            color = if (valueMb == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            color = if (dragValue.roundToInt() == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold
         )
     }
 }
-
 @Composable
 private fun ToneSlider(
     label: String,

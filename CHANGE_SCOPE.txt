@@ -1,3 +1,9 @@
-Only the affected files are included in this package.
-Build workflow/build_apk.yml was not changed and is intentionally not included.
-Replace each file at the same relative path under the project root.
+Music V15 Final Patch
+- Fixed compile blocker from previous GitHub build: no change needed in this patch for that error; this ZIP is based on the V15 source patch.
+- Enlarged Now Playing square card from 320dp maximum to 360dp.
+- Increased central Aditya logo inside the player card from 190dp to 220dp.
+- Replaced the old draggable + animateFloatAsState + AnimatedContent swipe stack with one Animatable-based horizontal gesture.
+- Drag movement is now directly tied to the finger; release uses a short settle animation.
+- Next/previous song enters from the opposite side after a successful swipe.
+- Kept centered EQ behavior, independent fine-band control, custom foreground volume HUD, notification music-note icon, and improved logo color from V15.
+Only affected files are included.
