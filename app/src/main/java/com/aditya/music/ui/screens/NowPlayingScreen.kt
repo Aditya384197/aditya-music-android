@@ -7,6 +7,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -20,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -143,9 +145,13 @@ fun NowPlayingScreen(
                     val density = LocalDensity.current
                     val cardWidthPx = with(density) { maxWidth.toPx().coerceAtLeast(1f) }
                     val cardOffset = remember(song.id) { Animatable(0f) }
+                    var dragOffset by remember(song.id) { mutableFloatStateOf(0f) }
+                    var isDragging by remember(song.id) { mutableStateOf(false) }
 
                     LaunchedEffect(song.id) {
                         val direction = swipeDirection
+                        isDragging = false
+                        dragOffset = 0f
                         if (direction != 0) {
                             // The new song enters from the side opposite to the outgoing card.
                             cardOffset.snapTo(if (direction < 0) cardWidthPx else -cardWidthPx)
@@ -164,21 +170,27 @@ fun NowPlayingScreen(
                             .fillMaxSize()
                             .pointerInput(song.id) {
                                 detectHorizontalDragGestures(
-                                    onHorizontalDrag = { change, dragAmount ->
-                                        change.consume()
-                                        if (cardOffset.value != 0f || abs(dragAmount) > 0f) {
-                                            val next = (cardOffset.value + dragAmount)
-                                                .coerceIn(-cardWidthPx, cardWidthPx)
-                                            // Animatable keeps the finger movement directly tied to the card.
-                                            cardOffset.snapTo(next)
-                                        }
+                                    onHorizontalDrag = { _, dragAmount ->
+                                        // Keep the finger movement synchronous with Compose state;
+                                        // no coroutine is launched for every pointer event.
+                                        dragOffset = (dragOffset + dragAmount)
+                                            .coerceIn(-cardWidthPx, cardWidthPx)
+                                    },
+                                    onDragStart = { _ ->
+                                        isDragging = true
+                                        dragOffset = cardOffset.value
                                     },
                                     onDragEnd = {
+                                        val releasedOffset = dragOffset
                                         swipeScope.launch {
-                                            val currentOffset = cardOffset.value
+                                            // First synchronize the animation state with the exact
+                                            // position at which the finger was released.
+                                            cardOffset.snapTo(releasedOffset)
+                                            isDragging = false
+
                                             val threshold = cardWidthPx * 0.20f
-                                            if (abs(currentOffset) >= threshold) {
-                                                val direction = if (currentOffset < 0f) -1 else 1
+                                            if (abs(releasedOffset) >= threshold) {
+                                                val direction = if (releasedOffset < 0f) -1 else 1
                                                 val target = if (direction < 0) -cardWidthPx else cardWidthPx
                                                 cardOffset.animateTo(
                                                     targetValue = target,
@@ -196,7 +208,10 @@ fun NowPlayingScreen(
                                         }
                                     },
                                     onDragCancel = {
+                                        val cancelledOffset = dragOffset
                                         swipeScope.launch {
+                                            cardOffset.snapTo(cancelledOffset)
+                                            isDragging = false
                                             cardOffset.animateTo(
                                                 targetValue = 0f,
                                                 animationSpec = tween(170)
@@ -211,7 +226,7 @@ fun NowPlayingScreen(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
-                                    val offset = cardOffset.value
+                                    val offset = if (isDragging) dragOffset else cardOffset.value
                                     translationX = offset
                                     rotationZ = (offset / cardWidthPx) * 1.6f
                                     val scale = 1f - (abs(offset) / cardWidthPx) * 0.025f
