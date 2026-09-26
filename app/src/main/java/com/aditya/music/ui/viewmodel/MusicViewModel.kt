@@ -1,13 +1,8 @@
 package com.aditya.music.ui.viewmodel
 
 import android.app.Application
-import android.database.ContentObserver
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -24,6 +19,8 @@ import com.aditya.music.data.model.Song
 import com.aditya.music.data.repository.MusicRepository
 import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerState
+import com.aditya.music.media.player.VolumeController
+import com.aditya.music.media.player.VolumeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -90,6 +87,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     val equalizerState: StateFlow<EqualizerState> = EqualizerController.state
+    val volumeState: StateFlow<VolumeState> = VolumeController.state
 
     private val headsetPrefs = application.getSharedPreferences("aditya_music_headset", Application.MODE_PRIVATE)
     private val _headsetProfiles = MutableStateFlow<List<HeadsetProfile>>(emptyList())
@@ -99,19 +97,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedHeadsetType = MutableStateFlow<String?>(headsetPrefs.getString("type", null))
     val selectedHeadsetType: StateFlow<String?> = _selectedHeadsetType.asStateFlow()
 
-    private var libraryRefreshJob: Job? = null
-
-    private val mediaStoreObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
-        override fun onChange(selfChange: Boolean, uri: Uri?) {
-            scheduleLibraryRefresh()
-        }
-
-        override fun onChange(selfChange: Boolean) {
-            scheduleLibraryRefresh()
-        }
-    }
-
     init {
+        VolumeController.initialize(application)
         viewModelScope.launch(Dispatchers.IO) {
             _headsetProfiles.value = HeadsetProfileStore.load(application)
             val saved = headsetPrefs.getString("profile", null)
@@ -122,27 +109,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     ?.let { _selectedHeadsetProfile.value = it }
             }
         }
-
-        val observedAudioUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
-        } else {
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        }
-        application.contentResolver.registerContentObserver(
-            observedAudioUri,
-            true,
-            mediaStoreObserver
-        )
-    }
-
-    private fun scheduleLibraryRefresh() {
-        if (!hasPermission.value) return
-        libraryRefreshJob?.cancel()
-        libraryRefreshJob = viewModelScope.launch {
-            delay(700L)
-            while (isScanning.value) delay(300L)
-            refreshLibrary()
-        }
     }
 
     private val _openNowPlayingEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -152,18 +118,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     val filteredSongs: StateFlow<List<Song>> = combine(
-        allSongs, searchQuery
-    ) { songs, query ->
+        allSongs, searchQuery, repository.songIdsByPlayCount
+    ) { songs, query, playOrder ->
+        val rankMap = playOrder.withIndex().associate { (index, songId) ->
+            songId to playOrder.size - index
+        }
         val base = if (query.isBlank()) songs
         else songs.filter {
             it.title.contains(query, ignoreCase = true) ||
                 it.artist.contains(query, ignoreCase = true) ||
                 it.album.contains(query, ignoreCase = true)
         }
-
         base.sortedWith(
-            compareByDescending<Song> { it.dateAdded }
-                .thenByDescending { it.id }
+            compareByDescending<Song> { rankMap[it.id] ?: 0 }
+                .thenBy { it.title.lowercase() }
         )
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -273,6 +241,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             Player.REPEAT_MODE_ONE -> "one"
             else -> "off"
         }
+        controller.volume = VolumeController.playerVolume()
         syncQueueFromController()
         startPositionTicker()
     }
@@ -487,6 +456,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetEqualizer() = EqualizerController.reset()
 
+    fun setVolumePercent(percent: Int) {
+        VolumeController.setPercent(getApplication(), percent)
+        mediaController?.volume = VolumeController.playerVolume()
+    }
+
     fun saveHeadsetType(type: String) {
         _selectedHeadsetType.value = type
         headsetPrefs.edit().putString("type", type).apply()
@@ -524,14 +498,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (i != keepIndex) controller.removeMediaItem(i)
         }
         syncQueueFromController()
-    }
-
-    override fun onCleared() {
-        libraryRefreshJob?.cancel()
-        getApplication<Application>().contentResolver.unregisterContentObserver(mediaStoreObserver)
-        tickerJob?.cancel()
-        sleepTimerJob?.cancel()
-        super.onCleared()
     }
     private val _deletePermissionRequest = MutableSharedFlow<android.content.IntentSender>(extraBufferCapacity = 1)
     val deletePermissionRequest = _deletePermissionRequest.asSharedFlow()

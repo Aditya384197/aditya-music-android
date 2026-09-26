@@ -56,9 +56,8 @@ private const val KEY_HEADSET_PROFILE = "headset_profile"
 private const val KEY_HEADSET_ACTIVE = "headset_active"
 private const val CURRENT_SCHEMA = 3
 
-private const val MIN_TONE_DB = -6f
-private const val MAX_TONE_DB = 6f
-private const val EQ_HEADROOM_MB = 100
+private const val MIN_TONE_DB = -9f
+private const val MAX_TONE_DB = 9f
 
 /** Base preset values at roughly 60 Hz, 250 Hz, 1 kHz, 4 kHz and 16 kHz. */
 private val PRESET_CURVES_DB = mapOf(
@@ -285,8 +284,18 @@ class EqualizerManager(
     fun setBandLevel(band: Int, level: Short) {
         if (band !in bandLevelsMbInternal.indices) return
         val range = safeBandLevelRange()
-        val clamped = level.toInt().coerceIn(range.first, range.second).toShort()
-        baseBandLevelsMbInternal[band] = clamped
+        val requestedFinal = level.toInt().coerceIn(range.first, range.second)
+        val hz = bandFrequenciesHzInternal.getOrElse(band) { 1000 }
+        val toneOffsetDb = bassContributionDb(hz, bassDb) +
+            midContributionDb(hz, midDb) +
+            trebleContributionDb(hz, trebleDb)
+        // Fine-band controls set the ACTUAL band level. Store the inverse of the current
+        // macro tone contribution so changing one band no longer makes the three macro
+        // controls appear to drag that band around unpredictably.
+        baseBandLevelsMbInternal[band] =
+            (requestedFinal - dbToMillibel(toneOffsetDb).toInt())
+                .coerceIn(range.first, range.second)
+                .toShort()
         preset = PRESET_CUSTOM
         enabled = supported
         headsetProfileActive = false
@@ -351,22 +360,12 @@ class EqualizerManager(
         if (baseBandLevelsMbInternal.isEmpty()) return
         val range = safeBandLevelRange()
 
-        val rawLevels = IntArray(baseBandLevelsMbInternal.size) { index ->
+        baseBandLevelsMbInternal.indices.forEach { index ->
             val hz = bandFrequenciesHzInternal.getOrElse(index) { 1000 }
             val toneOffset = bassContributionDb(hz, bassDb) +
                 midContributionDb(hz, midDb) +
                 trebleContributionDb(hz, trebleDb)
-            (baseBandLevelsMbInternal[index].toInt() + dbToMillibel(toneOffset).toInt())
-                .coerceIn(range.first, range.second)
-        }
-
-        // EQ boosts can stack across fine bands and Bass/Mid/Treble. Keep the loudest
-        // resulting band about 1 dB below unity so peaks are less likely to clip.
-        val peakMb = rawLevels.maxOrNull() ?: 0
-        val headroomMb = if (peakMb > 0) peakMb + EQ_HEADROOM_MB else 0
-
-        rawLevels.forEachIndexed { index, rawLevel ->
-            val finalLevel = (rawLevel - headroomMb)
+            val finalLevel = (baseBandLevelsMbInternal[index].toInt() + dbToMillibel(toneOffset))
                 .coerceIn(range.first, range.second)
                 .toShort()
             bandLevelsMbInternal[index] = finalLevel

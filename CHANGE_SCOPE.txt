@@ -1,0 +1,3 @@
+Only the affected files are included in this package.
+Build workflow/build_apk.yml was not changed and is intentionally not included.
+Replace each file at the same relative path under the project root.

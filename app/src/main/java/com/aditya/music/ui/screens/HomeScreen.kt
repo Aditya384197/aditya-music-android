@@ -96,7 +96,7 @@ fun HomeScreen(
     }
 
     val orderedSongs = remember(
-        songs, recentlyPlayed, favorites, selectedFilter, searchQuery
+        songs, recentlyPlayed, favorites, currentSong?.id, selectedFilter, searchQuery
     ) {
         val query = searchQuery.trim()
         val base = if (query.isBlank()) filterSongs else filterSongs.filter {
@@ -106,10 +106,9 @@ fun HomeScreen(
         }
 
         if (selectedFilter == null) {
-            base.sortedWith(
-                compareByDescending<Song> { it.dateAdded }
-                    .thenByDescending { it.id }
-            )
+            // Library order is acquisition order: newest MediaStore DATE_ADDED first.
+            // Playback history must never reshuffle the main library.
+            base.sortedByDescending { it.dateAdded }
         } else base
     }
 
