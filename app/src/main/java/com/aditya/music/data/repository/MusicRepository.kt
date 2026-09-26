@@ -56,7 +56,7 @@ class MusicRepository(
         )
 
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 10000"
-        val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
+        val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         try {
             contentResolver.query(collection, projection, selection, null, sortOrder)?.use { cursor ->

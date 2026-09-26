@@ -1,4 +1,21 @@
-<?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@drawable/music_logo" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Clean AK Music monogram: bold A + play cut + equalizer accent. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,18 L28,88 L40,88 L46,70 L62,70 L68,88 L80,88 Z M54,34 L59,58 L49,58 Z" />
+
+    <!-- Play button integrated into the A instead of a separate symbol. -->
+    <path
+        android:fillColor="#7C3AED"
+        android:pathData="M58,42 L58,62 L75,52 Z" />
+
+    <!-- Small equalizer bars give the mark a music identity at icon size. -->
+    <path
+        android:fillColor="#22D3EE"
+        android:pathData="M78,70h6v12h-6z M87,62h6v20h-6z M96,74h6v8h-6z" />
+</vector>

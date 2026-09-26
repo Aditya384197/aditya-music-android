@@ -96,7 +96,7 @@ fun HomeScreen(
     }
 
     val orderedSongs = remember(
-        songs, recentlyPlayed, favorites, currentSong?.id, selectedFilter, searchQuery
+        songs, favorites, selectedFilter, searchQuery
     ) {
         val query = searchQuery.trim()
         val base = if (query.isBlank()) filterSongs else filterSongs.filter {
@@ -106,8 +106,10 @@ fun HomeScreen(
         }
 
         if (selectedFilter == null) {
-            // Library order is acquisition order: newest MediaStore DATE_ADDED first.
-            // Playback history must never reshuffle the main library.
+            // Newest-added first: a song you just downloaded/copied in always lands at the very
+            // top, regardless of how much (or how little) it's been played. No more "most played
+            // rises to the top" behaviour here - that's what the separate "Recent" filter chip
+            // (recently *played*) is for.
             base.sortedByDescending { it.dateAdded }
         } else base
     }

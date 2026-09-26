@@ -7,6 +7,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
@@ -16,7 +17,6 @@ import com.aditya.music.R
 import com.aditya.music.data.headset.HeadsetProfile
 import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerManager
-import com.aditya.music.media.player.VolumeController
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -68,14 +68,21 @@ class MusicService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
-        VolumeController.initialize(this)
 
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .setUsage(C.USAGE_MEDIA)
             .build()
 
-        val exoPlayer = ExoPlayer.Builder(this)
+        // Highest-fidelity output path this device supports: 32-bit float PCM instead of the
+        // default 16-bit integer path. This does not change the source file, but it removes an
+        // extra layer of quantization/rounding on the way out, so the signal EQ/volume act on -
+        // and what ultimately reaches the DAC - keeps more of its original precision. Falls back
+        // silently to standard output on hardware that doesn't support float output.
+        val renderersFactory = DefaultRenderersFactory(this)
+            .setEnableAudioFloatOutput(true)
+
+        val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_LOCAL)
@@ -255,9 +262,6 @@ class MusicService : MediaLibraryService() {
             equalizerManager = null
             EqualizerController.detach()
         }
-
-        VolumeController.attach(audioSessionId)
-        player?.volume = VolumeController.playerVolume()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -266,7 +270,6 @@ class MusicService : MediaLibraryService() {
 
     override fun onDestroy() {
         EqualizerController.detach(equalizerManager)
-        VolumeController.release()
         equalizerManager?.release()
         equalizerManager = null
 

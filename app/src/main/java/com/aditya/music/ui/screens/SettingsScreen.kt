@@ -413,7 +413,7 @@ private fun ThemePickerDialog(
             Column {
                 Text("Choose theme", fontWeight = FontWeight.Bold)
                 Text(
-                    "Preview how Music will look",
+                    "Preview how Aditya Music will look",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

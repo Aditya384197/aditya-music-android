@@ -19,8 +19,6 @@ import com.aditya.music.data.model.Song
 import com.aditya.music.data.repository.MusicRepository
 import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerState
-import com.aditya.music.media.player.VolumeController
-import com.aditya.music.media.player.VolumeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -87,7 +85,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     val equalizerState: StateFlow<EqualizerState> = EqualizerController.state
-    val volumeState: StateFlow<VolumeState> = VolumeController.state
 
     private val headsetPrefs = application.getSharedPreferences("aditya_music_headset", Application.MODE_PRIVATE)
     private val _headsetProfiles = MutableStateFlow<List<HeadsetProfile>>(emptyList())
@@ -98,7 +95,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val selectedHeadsetType: StateFlow<String?> = _selectedHeadsetType.asStateFlow()
 
     init {
-        VolumeController.initialize(application)
         viewModelScope.launch(Dispatchers.IO) {
             _headsetProfiles.value = HeadsetProfileStore.load(application)
             val saved = headsetPrefs.getString("profile", null)
@@ -241,7 +237,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             Player.REPEAT_MODE_ONE -> "one"
             else -> "off"
         }
-        controller.volume = VolumeController.playerVolume()
         syncQueueFromController()
         startPositionTicker()
     }
@@ -455,11 +450,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setEqualizerBand(index: Int, levelMb: Int) = EqualizerController.setBandLevel(index, levelMb)
 
     fun resetEqualizer() = EqualizerController.reset()
-
-    fun setVolumePercent(percent: Int) {
-        VolumeController.setPercent(getApplication(), percent)
-        mediaController?.volume = VolumeController.playerVolume()
-    }
 
     fun saveHeadsetType(type: String) {
         _selectedHeadsetType.value = type

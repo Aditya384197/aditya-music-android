@@ -1,17 +1,24 @@
 package com.aditya.music.ui.screens
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -19,14 +26,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.consume
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aditya.music.data.model.Song
 import com.aditya.music.media.player.PRESET_CLASSICAL
 import com.aditya.music.media.player.PRESET_CUSTOM
 import com.aditya.music.media.player.PRESET_DANCE
@@ -34,10 +43,8 @@ import com.aditya.music.media.player.PRESET_FLAT
 import com.aditya.music.media.player.PRESET_POP
 import com.aditya.music.media.player.PRESET_ROCK
 import com.aditya.music.media.player.PRESET_VOCAL
-import com.aditya.music.ui.components.AdityaLogo
+import com.aditya.music.ui.components.ArtworkView
 import com.aditya.music.ui.viewmodel.MusicViewModel
-import kotlinx.coroutines.launch
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -60,338 +67,231 @@ fun NowPlayingScreen(
     var showEqualizer by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showSleepDialog by remember { mutableStateOf(false) }
-    var showVolumeSheet by remember { mutableStateOf(false) }
-    var swipeDirection by remember { mutableIntStateOf(0) }
-    val swipeScope = rememberCoroutineScope()
-    val volumeState by viewModel.volumeState.collectAsState()
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Now Playing", fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
+    // The whole page (background, top bar and Scaffold) is transparent so the ambient animated
+    // backdrop drawn below shows through everywhere, with the controls floating on top of it.
+    Box(modifier = Modifier.fillMaxSize()) {
+        AmbientAnimatedBackground(modifier = Modifier.fillMaxSize())
+
+        Scaffold(
+            containerColor = Color.Transparent,
+            topBar = {
+                TopAppBar(
+                    title = { Text("Now Playing", fontWeight = FontWeight.SemiBold) },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    navigationIcon = {
+                        IconButton(onClick = onClose) {
+                            Icon(Icons.Rounded.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showEqualizer = true }) {
+                            Icon(
+                                Icons.Rounded.Equalizer,
+                                contentDescription = "Equalizer",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Box {
+                            IconButton(onClick = { showMoreMenu = true }) {
+                                Icon(Icons.Rounded.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(
+                                expanded = showMoreMenu,
+                                onDismissRequest = { showMoreMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Playing queue") },
+                                    leadingIcon = { Icon(Icons.Rounded.QueueMusic, null) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onOpenQueue()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(if (sleepRemainingMs > 0L) "Change sleep timer" else "Sleep timer")
+                                    },
+                                    leadingIcon = { Icon(Icons.Rounded.Bedtime, null) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        showSleepDialog = true
+                                    }
+                                )
+                                if (sleepRemainingMs > 0L) {
+                                    DropdownMenuItem(
+                                        text = { Text("Cancel sleep timer") },
+                                        leadingIcon = { Icon(Icons.Rounded.TimerOff, null) },
+                                        onClick = {
+                                            viewModel.cancelSleepTimer()
+                                            showMoreMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
-                },
-                actions = {
-                    IconButton(onClick = { showEqualizer = true }) {
-                        Icon(
-                            Icons.Rounded.Equalizer,
-                            contentDescription = "Equalizer",
-                            tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        ) { padding ->
+            currentSong?.let { song ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(horizontal = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    FloatingArtwork(
+                        song = song,
+                        onSwipeNext = { viewModel.playNext() },
+                        onSwipePrevious = { viewModel.playPrevious() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .sizeIn(maxWidth = 320.dp, maxHeight = 320.dp)
+                    )
+
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = song.title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().basicMarquee()
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            text = song.artist,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().basicMarquee()
+                        )
+                        Text(
+                            text = song.album,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Box {
-                        IconButton(onClick = { showMoreMenu = true }) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "More")
-                        }
-                        DropdownMenu(
-                            expanded = showMoreMenu,
-                            onDismissRequest = { showMoreMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Playing queue") },
-                                leadingIcon = { Icon(Icons.Rounded.QueueMusic, null) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    onOpenQueue()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(if (sleepRemainingMs > 0L) "Change sleep timer" else "Sleep timer")
-                                },
-                                leadingIcon = { Icon(Icons.Rounded.Bedtime, null) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    showSleepDialog = true
-                                }
-                            )
-                            if (sleepRemainingMs > 0L) {
-                                DropdownMenuItem(
-                                    text = { Text("Cancel sleep timer") },
-                                    leadingIcon = { Icon(Icons.Rounded.TimerOff, null) },
-                                    onClick = {
-                                        viewModel.cancelSleepTimer()
-                                        showMoreMenu = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        currentSong?.let { song ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 22.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceEvenly
-            ) {
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .sizeIn(maxWidth = 360.dp, maxHeight = 360.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val density = LocalDensity.current
-                    val cardWidthPx = with(density) { maxWidth.toPx().coerceAtLeast(1f) }
-                    val cardOffset = remember(song.id) { Animatable(0f) }
 
-                    LaunchedEffect(song.id) {
-                        val direction = swipeDirection
-                        if (direction != 0) {
-                            // The new song enters from the side opposite to the outgoing card.
-                            cardOffset.snapTo(if (direction < 0) cardWidthPx else -cardWidthPx)
-                            cardOffset.animateTo(
-                                targetValue = 0f,
-                                animationSpec = tween(170)
-                            )
-                            swipeDirection = 0
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        var draggingProgress by remember(song.id) { mutableStateOf<Float?>(null) }
+                        val duration = song.duration.coerceAtLeast(0L)
+                        val actualProgress = if (duration > 0L) {
+                            (currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+                        } else 0f
+                        val shownProgress = draggingProgress ?: actualProgress
+                        val shownPositionMs = if (draggingProgress != null) {
+                            (draggingProgress!! * duration).toLong()
                         } else {
-                            cardOffset.snapTo(0f)
+                            currentPosition
                         }
-                    }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .pointerInput(song.id) {
-                                detectHorizontalDragGestures(
-                                    onHorizontalDrag = { change, dragAmount ->
-                                        change.consume()
-                                        if (cardOffset.value != 0f || abs(dragAmount) > 0f) {
-                                            val next = (cardOffset.value + dragAmount)
-                                                .coerceIn(-cardWidthPx, cardWidthPx)
-                                            // Animatable keeps the finger movement directly tied to the card.
-                                            cardOffset.snapTo(next)
-                                        }
-                                    },
-                                    onDragEnd = {
-                                        swipeScope.launch {
-                                            val currentOffset = cardOffset.value
-                                            val threshold = cardWidthPx * 0.20f
-                                            if (abs(currentOffset) >= threshold) {
-                                                val direction = if (currentOffset < 0f) -1 else 1
-                                                val target = if (direction < 0) -cardWidthPx else cardWidthPx
-                                                cardOffset.animateTo(
-                                                    targetValue = target,
-                                                    animationSpec = tween(150)
-                                                )
-                                                swipeDirection = direction
-                                                if (direction < 0) viewModel.playNext()
-                                                else viewModel.playPrevious()
-                                            } else {
-                                                cardOffset.animateTo(
-                                                    targetValue = 0f,
-                                                    animationSpec = tween(170)
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onDragCancel = {
-                                        swipeScope.launch {
-                                            cardOffset.animateTo(
-                                                targetValue = 0f,
-                                                animationSpec = tween(170)
-                                            )
-                                        }
-                                    }
-                                )
+                        Slider(
+                            value = shownProgress,
+                            onValueChange = { draggingProgress = it },
+                            onValueChangeFinished = {
+                                draggingProgress?.let { viewModel.seekTo((it * duration).toLong()) }
+                                draggingProgress = null
                             },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    val offset = cardOffset.value
-                                    translationX = offset
-                                    rotationZ = (offset / cardWidthPx) * 1.6f
-                                    val scale = 1f - (abs(offset) / cardWidthPx) * 0.025f
-                                    scaleX = scale
-                                    scaleY = scale
-                                },
-                            shape = RoundedCornerShape(30.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            tonalElevation = 12.dp,
-                            shadowElevation = 18.dp
+                            enabled = duration > 0L
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        androidx.compose.ui.graphics.Brush.radialGradient(
-                                            colors = listOf(
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                                                MaterialTheme.colorScheme.surfaceVariant,
-                                                MaterialTheme.colorScheme.background
-                                            )
-                                        )
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                AdityaLogo(size = 220.dp)
-                            }
+                            Text(formatDuration(shownPositionMs), style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.weight(1f))
+                            Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium)
                         }
                     }
-                }
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = song.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth().basicMarquee()
-                    )
-                    Spacer(Modifier.height(5.dp))
-                    Text(
-                        text = song.artist,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth().basicMarquee()
-                    )
-                    Text(
-                        text = song.album,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    var draggingProgress by remember(song.id) { mutableStateOf<Float?>(null) }
-                    val duration = song.duration.coerceAtLeast(0L)
-                    val actualProgress = if (duration > 0L) {
-                        (currentPosition.toFloat() / duration).coerceIn(0f, 1f)
-                    } else 0f
-                    val shownProgress = draggingProgress ?: actualProgress
-                    val shownPositionMs = if (draggingProgress != null) {
-                        (draggingProgress!! * duration).toLong()
-                    } else {
-                        currentPosition
+                    if (sleepRemainingMs > 0L) {
+                        AssistChip(
+                            onClick = { showSleepDialog = true },
+                            label = { Text("Sleep ${formatTimer(sleepRemainingMs)}") },
+                            leadingIcon = { Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp)) }
+                        )
                     }
 
-                    Slider(
-                        value = shownProgress,
-                        onValueChange = { draggingProgress = it },
-                        onValueChangeFinished = {
-                            draggingProgress?.let { viewModel.seekTo((it * duration).toLong()) }
-                            draggingProgress = null
-                        },
-                        enabled = duration > 0L
-                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(formatDuration(shownPositionMs), style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.weight(1f))
-                        Text(formatDuration(duration), style = MaterialTheme.typography.labelMedium)
+                        IconButton(
+                            onClick = { viewModel.playPrevious() },
+                            modifier = Modifier.size(54.dp)
+                        ) {
+                            Icon(Icons.Rounded.SkipPrevious, "Previous", Modifier.size(34.dp))
+                        }
+                        Spacer(Modifier.width(22.dp))
+                        FilledIconButton(
+                            onClick = { viewModel.togglePlayPause() },
+                            modifier = Modifier.size(72.dp),
+                            shape = CircleShape
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                modifier = Modifier.size(38.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(22.dp))
+                        IconButton(
+                            onClick = { viewModel.playNext() },
+                            modifier = Modifier.size(54.dp)
+                        ) {
+                            Icon(Icons.Rounded.SkipNext, "Next", Modifier.size(34.dp))
+                        }
                     }
-                }
 
-                if (sleepRemainingMs > 0L) {
-                    AssistChip(
-                        onClick = { showSleepDialog = true },
-                        label = { Text("Sleep ${formatTimer(sleepRemainingMs)}") },
-                        leadingIcon = { Icon(Icons.Rounded.Bedtime, null, Modifier.size(18.dp)) }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { viewModel.playPrevious() },
-                        modifier = Modifier.size(54.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Rounded.SkipPrevious, "Previous", Modifier.size(34.dp))
-                    }
-                    Spacer(Modifier.width(22.dp))
-                    FilledIconButton(
-                        onClick = { viewModel.togglePlayPause() },
-                        modifier = Modifier.size(72.dp),
-                        shape = CircleShape
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
-                            modifier = Modifier.size(38.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(22.dp))
-                    IconButton(
-                        onClick = { viewModel.playNext() },
-                        modifier = Modifier.size(54.dp)
-                    ) {
-                        Icon(Icons.Rounded.SkipNext, "Next", Modifier.size(34.dp))
+                        IconButton(onClick = { currentSong?.id?.let(viewModel::toggleFavorite) }) {
+                            Icon(
+                                if (isCurrentFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                "Favorite",
+                                tint = if (isCurrentFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = { viewModel.toggleShuffle() }) {
+                            Icon(
+                                Icons.Rounded.Shuffle,
+                                "Shuffle",
+                                tint = if (isShuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = { viewModel.toggleRepeat() }) {
+                            Icon(
+                                when (repeatMode) {
+                                    "one" -> Icons.Rounded.RepeatOne
+                                    else -> Icons.Rounded.Repeat
+                                },
+                                "Repeat",
+                                tint = if (repeatMode != "off") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(onClick = onOpenQueue) {
+                            Icon(Icons.Rounded.QueueMusic, "Queue")
+                        }
                     }
                 }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { currentSong?.id?.let(viewModel::toggleFavorite) }) {
-                        Icon(
-                            if (isCurrentFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                            "Favorite",
-                            tint = if (isCurrentFavorite) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = { viewModel.toggleShuffle() }) {
-                        Icon(
-                            Icons.Rounded.Shuffle,
-                            "Shuffle",
-                            tint = if (isShuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = { viewModel.toggleRepeat() }) {
-                        Icon(
-                            when (repeatMode) {
-                                "one" -> Icons.Rounded.RepeatOne
-                                else -> Icons.Rounded.Repeat
-                            },
-                            "Repeat",
-                            tint = if (repeatMode != "off") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = { showVolumeSheet = true }) {
-                        Icon(
-                            when {
-                                volumeState.percent == 0 -> Icons.Rounded.VolumeOff
-                                volumeState.percent < 100 -> Icons.Rounded.VolumeDown
-                                else -> Icons.Rounded.VolumeUp
-                            },
-                            "DJ volume ${volumeState.percent}%",
-                            tint = if (volumeState.percent > 100) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = onOpenQueue) {
-                        Icon(Icons.Rounded.QueueMusic, "Queue")
-                    }
-                }
+            } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No song loaded")
             }
-        } ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No song loaded")
         }
     }
 
@@ -400,14 +300,6 @@ fun NowPlayingScreen(
             viewModel = viewModel,
             supported = equalizerState.supported,
             onDismiss = { showEqualizer = false }
-        )
-    }
-
-    if (showVolumeSheet) {
-        VolumeBottomSheet(
-            percent = volumeState.percent,
-            onChange = viewModel::setVolumePercent,
-            onDismiss = { showVolumeSheet = false }
         )
     }
 
@@ -424,6 +316,108 @@ fun NowPlayingScreen(
             },
             onDismiss = { showSleepDialog = false }
         )
+    }
+}
+
+/**
+ * Slow-rotating ambient glow behind the whole Now Playing page. Purely decorative (low alpha,
+ * ~20s per rotation) so it never distracts from the artwork or competes for attention with the
+ * controls sitting on top of it.
+ */
+@Composable
+private fun AmbientAnimatedBackground(modifier: Modifier = Modifier) {
+    val infinite = rememberInfiniteTransition(label = "ambientBg")
+    val angle by infinite.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(22_000, easing = LinearEasing)),
+        label = "angle"
+    )
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val background = MaterialTheme.colorScheme.background
+
+    Box(modifier = modifier.background(background)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(1.6f)
+                .align(Alignment.Center)
+                .graphicsLayer { rotationZ = angle }
+                .background(
+                    Brush.sweepGradient(
+                        listOf(
+                            primary.copy(alpha = 0.20f),
+                            tertiary.copy(alpha = 0.14f),
+                            secondary.copy(alpha = 0.16f),
+                            background.copy(alpha = 0f),
+                            primary.copy(alpha = 0.20f)
+                        )
+                    )
+                )
+        )
+    }
+}
+
+/**
+ * The square artwork "box": gently bobs up and down to feel like it's floating above the
+ * background, casts a soft coloured shadow for depth, and can be swiped left/right to skip to
+ * the next/previous song without needing to reach for the buttons below.
+ */
+@Composable
+private fun FloatingArtwork(
+    song: Song,
+    onSwipeNext: () -> Unit,
+    onSwipePrevious: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infinite = rememberInfiniteTransition(label = "floatBob")
+    val bobOffset by infinite.animateFloat(
+        initialValue = -7f,
+        targetValue = 7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "bob"
+    )
+
+    val density = LocalDensity.current
+    val swipeThresholdPx = with(density) { 90.dp.toPx() }
+    var dragAccum by remember { mutableFloatStateOf(0f) }
+    val primary = MaterialTheme.colorScheme.primary
+
+    Crossfade(targetState = song.id, label = "artworkCrossfade") {
+        Box(
+            modifier = modifier
+                .graphicsLayer { translationY = bobOffset }
+                .shadow(
+                    elevation = 26.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    ambientColor = primary.copy(alpha = 0.35f),
+                    spotColor = primary.copy(alpha = 0.45f)
+                )
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { delta -> dragAccum += delta },
+                    onDragStopped = {
+                        when {
+                            dragAccum <= -swipeThresholdPx -> onSwipeNext()
+                            dragAccum >= swipeThresholdPx -> onSwipePrevious()
+                        }
+                        dragAccum = 0f
+                    }
+                )
+        ) {
+            ArtworkView(
+                artworkUri = song.albumArtUri,
+                modifier = Modifier.fillMaxSize(),
+                logoSize = 150.dp,
+                imageSizePx = 720,
+                contentDescription = "Album artwork",
+                shape = RoundedCornerShape(28.dp)
+            )
+        }
     }
 }
 
@@ -601,27 +595,27 @@ private fun VerticalBandSlider(
 ) {
     val trackHeight = 178.dp
     val thumbSize = 22.dp
-    val density = androidx.compose.ui.platform.LocalDensity.current
+    val density = LocalDensity.current
+    val dragHeightPx = with(density) { (trackHeight - thumbSize).toPx().coerceAtLeast(1f) }
+    val span = (maxMb - minMb).coerceAtLeast(1).toFloat()
 
-    // Keep the usable visual range perfectly symmetric so 0 dB is ALWAYS the exact center.
-    val symmetricAbsMb = minOf(kotlin.math.abs(minMb), kotlin.math.abs(maxMb)).coerceAtLeast(1)
-    val visualMinMb = -symmetricAbsMb
-    val visualMaxMb = symmetricAbsMb
-    val span = (visualMaxMb - visualMinMb).toFloat()
-    val thumbTravelPx = with(density) { (trackHeight - thumbSize).toPx().coerceAtLeast(1f) }
-    val clampedValue = valueMb.coerceIn(visualMinMb, visualMaxMb)
-
-    var dragValue by remember { mutableFloatStateOf(clampedValue.toFloat()) }
+    // Local drag position, kept separate from `valueMb` while the user is actively dragging.
+    // The value round-trips through the ViewModel and the Android Equalizer before coming back
+    // here as a new `valueMb`; that trip isn't instant, so every recomposition it triggered used
+    // to snap `dragValue` back to a slightly stale number mid-gesture. That's what made the
+    // slider feel like it wouldn't reach the top, got stuck, or jumped into negative values on
+    // its own - the thumb was fighting a value that kept resetting under the user's finger.
+    var dragValue by remember { mutableFloatStateOf(valueMb.toFloat()) }
     var isDragging by remember { mutableStateOf(false) }
-    LaunchedEffect(valueMb, visualMinMb, visualMaxMb) {
-        if (!isDragging) dragValue = clampedValue.toFloat()
+
+    LaunchedEffect(valueMb) {
+        if (!isDragging) dragValue = valueMb.toFloat()
     }
 
-    val normalized = ((dragValue - visualMinMb) / span).coerceIn(0f, 1f)
-    val thumbTopOffset = (trackHeight - thumbSize) * (1f - normalized)
-    val zeroNormalized = ((0f - visualMinMb) / span).coerceIn(0f, 1f)
-    val zeroLineHeight = 2.dp
-    val zeroTopOffset = (trackHeight - zeroLineHeight) * (1f - zeroNormalized)
+    val normalized = ((dragValue - minMb) / span).coerceIn(0f, 1f)
+    val thumbOffset = (trackHeight - thumbSize) * (1f - normalized)
+    val zeroNormalized = ((0 - minMb) / span).coerceIn(0f, 1f)
+    val zeroOffset = (trackHeight - 2.dp) * (1f - zeroNormalized)
 
     Column(
         modifier = Modifier.width(64.dp),
@@ -642,22 +636,16 @@ private fun VerticalBandSlider(
                 .draggable(
                     enabled = enabled,
                     orientation = Orientation.Vertical,
-                    onDragStarted = {
-                        isDragging = true
-                        dragValue = valueMb.coerceIn(visualMinMb, visualMaxMb).toFloat()
-                    },
-                    onDragStopped = {
-                        isDragging = false
-                        dragValue = valueMb.coerceIn(visualMinMb, visualMaxMb).toFloat()
-                    },
+                    onDragStarted = { isDragging = true },
+                    onDragStopped = { isDragging = false },
                     state = rememberDraggableState { delta ->
-                        val next = (dragValue - (delta / thumbTravelPx) * span)
-                            .coerceIn(visualMinMb.toFloat(), visualMaxMb.toFloat())
+                        val next = (dragValue - (delta / dragHeightPx) * span)
+                            .coerceIn(minMb.toFloat(), maxMb.toFloat())
                         dragValue = next
-                        onValueChange(next.roundToInt().coerceIn(minMb, maxMb))
+                        onValueChange(next.roundToInt())
                     }
                 ),
-            contentAlignment = Alignment.TopCenter
+            contentAlignment = Alignment.Center
         ) {
             Box(
                 Modifier
@@ -666,34 +654,34 @@ private fun VerticalBandSlider(
                     .clip(RoundedCornerShape(4.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             )
-            // The zero/flat marker is exactly in the middle of the track.
             Box(
                 Modifier
-                    .width(24.dp)
-                    .height(zeroLineHeight)
-                    .offset(y = zeroTopOffset)
+                    .width(18.dp)
+                    .height(2.dp)
+                    .offset(y = zeroOffset)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.outline)
+                    .background(MaterialTheme.colorScheme.outlineVariant)
             )
             Surface(
                 modifier = Modifier
                     .size(thumbSize)
-                    .offset(y = thumbTopOffset),
+                    .offset(y = thumbOffset),
                 shape = CircleShape,
                 color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                shadowElevation = if (enabled) 3.dp else 0.dp
+                shadowElevation = if (enabled) 2.dp else 0.dp
             ) {}
         }
 
         Spacer(Modifier.height(7.dp))
         Text(
-            formatGain(dragValue.roundToInt().toShort()),
+            formatGain(valueMb.toShort()),
             style = MaterialTheme.typography.labelSmall,
-            color = if (dragValue.roundToInt() == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            color = if (valueMb == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold
         )
     }
 }
+
 @Composable
 private fun ToneSlider(
     label: String,
@@ -703,79 +691,18 @@ private fun ToneSlider(
 ) {
     Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
     Slider(
-        value = valueDb.coerceIn(-9f, 9f),
+        value = valueDb.coerceIn(-6f, 6f),
         onValueChange = onChange,
-        valueRange = -9f..9f,
-        steps = 35,
+        valueRange = -6f..6f,
+        steps = 23,
         enabled = enabled
     )
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("-9 dB", style = MaterialTheme.typography.labelSmall)
+        Text("-6 dB", style = MaterialTheme.typography.labelSmall)
         Text("${formatDb(valueDb)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        Text("+9 dB", style = MaterialTheme.typography.labelSmall)
+        Text("+6 dB", style = MaterialTheme.typography.labelSmall)
     }
     Spacer(Modifier.height(8.dp))
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun VolumeBottomSheet(
-    percent: Int,
-    onChange: (Int) -> Unit,
-    onDismiss: () -> Unit
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 22.dp, vertical = 8.dp)
-                .padding(bottom = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(
-                Icons.Rounded.GraphicEq,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(34.dp)
-            )
-            Text("DJ Volume", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(
-                if (percent > 100) "${percent}% • extra gain with protected loudness" else "${percent}% • 100% is unity gain",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(18.dp))
-            Text(
-                "${percent}%",
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.Black,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Slider(
-                value = percent.toFloat(),
-                onValueChange = { onChange(it.roundToInt()) },
-                valueRange = 0f..300f,
-                steps = 59,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("0%", style = MaterialTheme.typography.labelSmall)
-                Text("100%", style = MaterialTheme.typography.labelSmall)
-                Text("300%", style = MaterialTheme.typography.labelSmall)
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "ऊपर 100% पर ऐप का अतिरिक्त gain Android के LoudnessEnhancer के साथ नियंत्रित रहता है; 300% अधिकतम है।",
-                style = MaterialTheme.typography.labelSmall,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(10.dp))
-            FilledTonalButton(onClick = { onChange(100) }, modifier = Modifier.fillMaxWidth()) {
-                Text("Reset to 100%")
-            }
-        }
-    }
 }
 
 @Composable

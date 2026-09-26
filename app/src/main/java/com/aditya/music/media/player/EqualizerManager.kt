@@ -56,8 +56,8 @@ private const val KEY_HEADSET_PROFILE = "headset_profile"
 private const val KEY_HEADSET_ACTIVE = "headset_active"
 private const val CURRENT_SCHEMA = 3
 
-private const val MIN_TONE_DB = -9f
-private const val MAX_TONE_DB = 9f
+private const val MIN_TONE_DB = -6f
+private const val MAX_TONE_DB = 6f
 
 /** Base preset values at roughly 60 Hz, 250 Hz, 1 kHz, 4 kHz and 16 kHz. */
 private val PRESET_CURVES_DB = mapOf(
@@ -208,9 +208,7 @@ class EqualizerManager(
         bassDb = bassDb,
         midDb = midDb,
         trebleDb = trebleDb,
-        // Expose the user-controlled fine-band value, not the macro-adjusted output.
-        // This keeps the fine slider centered at 0 dB and independent from Bass/Mid/Treble.
-        bandLevelsMb = baseBandLevelsMbInternal.toList(),
+        bandLevelsMb = bandLevelsMbInternal.toList(),
         bandFrequenciesHz = bandFrequenciesHzInternal.toList(),
         bandLevelMinMb = bandLevelMinMbInternal,
         bandLevelMaxMb = bandLevelMaxMbInternal,
@@ -284,14 +282,10 @@ class EqualizerManager(
     }
 
     fun setBandLevel(band: Int, level: Short) {
-        if (band !in baseBandLevelsMbInternal.indices) return
+        if (band !in bandLevelsMbInternal.indices) return
         val range = safeBandLevelRange()
-        // Fine-band controls are the user's independent per-frequency values.
-        // Bass/Mid/Treble are applied later in applyAllBandLevels(), so changing a macro
-        // control cannot move this slider away from its own 0 dB center position.
-        baseBandLevelsMbInternal[band] = level.toInt()
-            .coerceIn(range.first, range.second)
-            .toShort()
+        val clamped = level.toInt().coerceIn(range.first, range.second).toShort()
+        baseBandLevelsMbInternal[band] = clamped
         preset = PRESET_CUSTOM
         enabled = supported
         headsetProfileActive = false

@@ -10,14 +10,13 @@ import androidx.compose.ui.unit.dp
 import com.aditya.music.R
 
 /**
- * Single source of truth for the app's main music mark.
- * The artwork is the cleaned square logo supplied for the app, with the stray
- * outer sparkle removed and a restrained blue/violet/amber color treatment.
+ * The app's music-note logo (res/drawable-nodpi/aditya_logo.png). Used as the artwork
+ * placeholder, the About-screen mark and the app's launcher icon foreground.
  */
 @Composable
 fun AdityaLogo(modifier: Modifier = Modifier, size: Dp = 48.dp) {
     Image(
-        painter = painterResource(R.drawable.music_logo),
+        painter = painterResource(id = R.drawable.aditya_logo),
         contentDescription = null,
         modifier = modifier.size(size)
     )
