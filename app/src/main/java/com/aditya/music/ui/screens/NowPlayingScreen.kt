@@ -41,6 +41,7 @@ import com.aditya.music.media.player.PRESET_VOCAL
 import com.aditya.music.ui.components.AdityaLogo
 import com.aditya.music.ui.viewmodel.MusicViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
