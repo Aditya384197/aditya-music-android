@@ -155,7 +155,7 @@ fun NowPlayingScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .sizeIn(maxWidth = 356.dp, maxHeight = 356.dp)
+                            .sizeIn(maxWidth = 400.dp, maxHeight = 400.dp)
                     )
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

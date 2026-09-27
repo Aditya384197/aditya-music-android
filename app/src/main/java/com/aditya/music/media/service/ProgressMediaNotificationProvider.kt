@@ -20,8 +20,8 @@ import com.aditya.music.R
  * small custom RemoteViews content view is layered onto Media3's own notification instead of
  * depending on that. Media3 still owns the channel, the action buttons/PendingIntents, and the
  * lock-screen/System UI wiring via [DefaultMediaNotificationProvider] - this only adds a content
- * view on top of what it already builds, plus a subtle brand-colour tint (`setColorized`) so the
- * card doesn't read as flat black.
+ * view on top of what it already builds, plus a slightly-lighter-than-black tint (not a bright
+ * brand colour - a plain neutral dark shade) so the card doesn't read as flat black.
  */
 @UnstableApi
 class ProgressMediaNotificationProvider(private val context: Context) :
@@ -96,7 +96,7 @@ class ProgressMediaNotificationProvider(private val context: Context) :
                 .setCustomContentView(remoteViews)
                 .setCustomBigContentView(remoteViews)
                 .setColorized(true)
-                .setColor(context.getColor(R.color.aditya_primary))
+                .setColor(context.getColor(R.color.aditya_dark_surface))
                 .build()
         }.getOrDefault(base)
     }
