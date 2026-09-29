@@ -95,7 +95,7 @@ class ProgressMediaNotificationProvider(private val context: Context) :
             setProgressBar(R.id.notif_progress, 1000, progress, durationMs <= 0)
             setImageViewBitmap(R.id.notif_art, art)
             setImageViewBitmap(R.id.notif_background, backgroundArt)
-            setImageViewAlpha(R.id.notif_background, 78)
+            setInt(R.id.notif_background, "setImageAlpha", 78)
         }
 
         return runCatching {
