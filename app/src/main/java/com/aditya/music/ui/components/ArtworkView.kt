@@ -7,7 +7,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -19,12 +18,10 @@ import coil.size.Size
 import com.aditya.music.R
 
 /**
- * Artwork renderer with a reliable Aditya logo fallback.
+ * Single-layer artwork renderer.
  *
- * The fallback logo fills this view exactly the way real album art would (matchParentSize +
- * ContentScale.Crop) - it used to sit as a small, fixed-size image centered inside a bigger
- * neutral-coloured box, which showed up as an unwanted "square inside a square": a visible outer
- * frame around a smaller logo. There's only ever one square now, same as when real artwork loads.
+ * The real Aditya logo is used directly as the fallback image. No artificial crop, zoom, glow,
+ * shadow or second square is added around the artwork.
  */
 @Composable
 fun ArtworkView(
@@ -33,29 +30,20 @@ fun ArtworkView(
     logoSize: Dp = Dp.Unspecified,
     imageSizePx: Int,
     contentDescription: String? = null,
-    cropScale: Float = 1f,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(14.dp)
 ) {
     val context = LocalContext.current
     var artworkFailed by remember(artworkUri) { mutableStateOf(artworkUri == null) }
 
     Box(modifier = modifier.clip(shape)) {
-        Image(
-            painter = painterResource(id = R.drawable.aditya_logo),
-            contentDescription = contentDescription,
-            modifier = Modifier
-                .matchParentSize()
-                .graphicsLayer {
-                    // The supplied album/logo artwork contains a small outer halo/padding.
-                    // Scale only the artwork inside the already-clipped square so that the
-                    // unwanted outer square is no longer visible.
-                    scaleX = cropScale
-                    scaleY = cropScale
-                },
-            contentScale = ContentScale.Crop
-        )
-
-        if (!artworkFailed && artworkUri != null) {
+        if (artworkFailed || artworkUri == null) {
+            Image(
+                painter = painterResource(id = R.drawable.aditya_logo),
+                contentDescription = contentDescription,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Fit
+            )
+        } else {
             AsyncImage(
                 model = remember(artworkUri, imageSizePx) {
                     ImageRequest.Builder(context)
@@ -65,13 +53,8 @@ fun ArtworkView(
                         .build()
                 },
                 contentDescription = contentDescription,
-                modifier = Modifier
-                    .matchParentSize()
-                    .graphicsLayer {
-                        scaleX = cropScale
-                        scaleY = cropScale
-                    },
-                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+                contentScale = ContentScale.Fit,
                 onSuccess = { artworkFailed = false },
                 onError = { artworkFailed = true }
             )

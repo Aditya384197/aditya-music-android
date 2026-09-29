@@ -14,7 +14,6 @@ import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import com.aditya.music.MainActivity
 import com.aditya.music.R
-import com.aditya.music.data.headset.HeadsetProfile
 import com.aditya.music.media.player.EqualizerController
 import com.aditya.music.media.player.EqualizerManager
 import org.json.JSONArray
@@ -101,13 +100,10 @@ class MusicService : MediaLibraryService() {
             .setUsage(C.USAGE_MEDIA)
             .build()
 
-        // Highest-fidelity output path this device supports: 32-bit float PCM instead of the
-        // default 16-bit integer path. This does not change the source file, but it removes an
-        // extra layer of quantization/rounding on the way out, so the signal EQ/volume act on -
-        // and what ultimately reaches the DAC - keeps more of its original precision. Falls back
-        // silently to standard output on hardware that doesn't support float output.
+        // Use Media3's standard renderer path for maximum device compatibility. Android's audio
+        // stack decides the final output format; the player itself adds no extra DSP or resampling
+        // layer beyond what the platform requires.
         val renderersFactory = DefaultRenderersFactory(this)
-            .setEnableAudioFloatOutput(true)
 
         val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setAudioAttributes(audioAttributes, true)
@@ -275,19 +271,15 @@ class MusicService : MediaLibraryService() {
             old.release()
         }
 
+        // Do not construct the Android audio effect when a track starts. The manager is attached
+        // as a lightweight controller and creates the real Equalizer lazily only when the user
+        // opens/changes the EQ. This keeps ordinary playback independent of vendor EQ drivers.
         runCatching {
             EqualizerManager(this, audioSessionId)
         }.onSuccess { manager ->
-            val headsetPrefs = getSharedPreferences("aditya_music_headset", MODE_PRIVATE)
-            if (headsetPrefs.getBoolean("apply_pending", false)) {
-                headsetPrefs.getString("profile", null)
-                    ?.let { raw -> runCatching { JSONObject(raw) }.getOrNull() }
-                    ?.let { HeadsetProfile.fromJson(it) }
-                    ?.let { profile -> manager.applyHeadsetProfile(profile) }
-                headsetPrefs.edit().putBoolean("apply_pending", false).apply()
-            }
             equalizerManager = manager
             EqualizerController.attach(manager)
+            if (manager.hasPersistedEnabledState()) manager.initializeIfNeeded()
         }.onFailure {
             equalizerManager = null
             EqualizerController.detach()

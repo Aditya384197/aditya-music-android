@@ -1,16 +1,44 @@
-Aditya Music — files changed for the current fix
+ADITYA MUSIC — DJ EQUALIZER / CRASH-SAFETY PATCH
 
-Replace these 5 files at the exact same paths in the repository:
-1. app/src/main/java/com/aditya/music/data/repository/MusicRepository.kt
-2. app/src/main/java/com/aditya/music/ui/components/ArtworkView.kt
-3. app/src/main/java/com/aditya/music/ui/screens/NowPlayingScreen.kt
-4. app/src/main/java/com/aditya/music/media/service/ProgressMediaNotificationProvider.kt
-5. app/src/main/res/layout/notification_media_progress.xml
+BASELINE:
+aditya-music-android-FULL-v5.zip
 
-Changes:
-- Fixes the current build failure: unresolved reference: awaitClose.
-- Lightly crops the Now Playing artwork (8%) so the unwanted outer halo/extra square is not visible.
-- Makes the expanded music notification more compact vertically.
-- Adds the current song artwork as a faint, darkened notification background.
-- Removes the opaque colorized notification background so the artwork can show through.
-- Caches notification artwork so the 1-second progress ticker does not decode the same image repeatedly.
+IMPORTANT:
+Replace the listed files from the project with these exact versions.
+Do not merge them with the previous 2026-09-29 patch.
+
+REPLACE:
+.github/workflows/build_apk.yml
+README.md
+app/src/main/java/com/aditya/music/data/repository/MusicRepository.kt
+app/src/main/java/com/aditya/music/media/player/EqualizerManager.kt
+app/src/main/java/com/aditya/music/media/service/MusicService.kt
+app/src/main/java/com/aditya/music/media/service/ProgressMediaNotificationProvider.kt
+app/src/main/java/com/aditya/music/ui/components/ArtworkView.kt
+app/src/main/java/com/aditya/music/ui/screens/NowPlayingScreen.kt
+app/src/main/java/com/aditya/music/ui/screens/SettingsScreen.kt
+app/src/main/java/com/aditya/music/ui/viewmodel/MusicViewModel.kt
+app/src/main/res/layout/notification_media_progress.xml
+
+DELETE completely:
+AUTOEQ_NOTICE.md
+app/src/main/assets/headset_profiles.json
+app/src/main/java/com/aditya/music/data/headset/HeadsetProfile.kt
+app/src/main/java/com/aditya/music/data/headset/HeadsetProfileStore.kt
+tools/generate_headset_profiles.py
+tools/__pycache__/generate_headset_profiles.cpython-313.pyc
+
+MAIN CHANGES:
+1. Artwork is rendered directly with ContentScale.Fit; no crop/zoom/extra glow container.
+2. Removed the old animated Now Playing background; replaced with a static low-cost background.
+3. Playback no longer creates/initializes the Android Equalizer effect unless EQ is actually enabled/used.
+4. Song start in MusicViewModel is guarded so MediaController command failures do not crash the UI flow.
+5. Rebuilt EQ as a real Android-session DJ-style multi-band equalizer with Flat/Pop/Rock/Dance/DJ/Vocal/Custom presets.
+6. Removed the complete Set Your Headset / headset-profile / AutoEq feature and its generation tooling.
+7. Notification artwork is cached and also used as a faint translucent background behind a slimmer content layout.
+8. Added the missing kotlinx.coroutines.channels.awaitClose import that was reported by the prior GitHub Actions build log.
+
+VERIFICATION PERFORMED:
+- No remaining references to HeadsetProfile, HeadsetProfileStore, aditya_music_headset, headset_profiles, generate_headset_profiles, AutoEq, PRESET_HEADSET, applyHeadsetProfile, selectedHeadset or saveHeadset.
+- notification_media_progress.xml and AndroidManifest.xml parsed successfully.
+- Full Gradle build could not be executed in this environment because the Gradle wrapper could not reach services.gradle.org (network/DNS unavailable).

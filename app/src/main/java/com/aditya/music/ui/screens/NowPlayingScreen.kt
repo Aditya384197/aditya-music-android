@@ -1,49 +1,35 @@
 package com.aditya.music.ui.screens
 
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.rotate
 import com.aditya.music.data.model.Song
-import com.aditya.music.media.player.PRESET_CLASSICAL
 import com.aditya.music.media.player.PRESET_CUSTOM
 import com.aditya.music.media.player.PRESET_DANCE
+import com.aditya.music.media.player.PRESET_DJ
 import com.aditya.music.media.player.PRESET_FLAT
 import com.aditya.music.media.player.PRESET_POP
 import com.aditya.music.media.player.PRESET_ROCK
@@ -72,6 +58,10 @@ fun NowPlayingScreen(
     var showEqualizer by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
     var showSleepDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showEqualizer) {
+        if (showEqualizer) viewModel.initializeEqualizer()
+    }
 
     // The whole page (background, top bar and Scaffold) is transparent so the ambient animated
     // backdrop drawn below shows through everywhere, with the controls floating on top of it.
@@ -325,199 +315,31 @@ fun NowPlayingScreen(
 }
 
 /**
- * Ambient glow behind the whole Now Playing page - decorative and low-alpha so it never
- * competes with the artwork or controls sitting on top of it. Rather than one single repeating
- * pattern, this slowly drifts through a handful of different looks (a rotating sweep, a soft
- * breathing glow, a wandering pair of blobs, a gentle diagonal wash) and cross-fades between them
- * so gradually that the switch itself is never noticeable - only that the background is always
- * quietly alive.
+ * Lightweight backdrop: a single static gradient replaces the previous continuously animated
+ * canvas scenes. It keeps the page premium-looking without consuming a render loop while music is
+ * playing.
  */
 @Composable
 private fun AmbientAnimatedBackground(modifier: Modifier = Modifier) {
-    val infinite = rememberInfiniteTransition(label = "ambientBg")
-
-    // Continuous motions that keep running no matter which scene is currently showing, so a
-    // scene never looks "reset" the moment it fades back in.
-    val rotation by infinite.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(26_000, easing = LinearEasing)),
-        label = "rotation"
-    )
-    val pulse by infinite.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(7_000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pulse"
-    )
-    val wander by infinite.animateFloat(
-        initialValue = 0f, targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(19_000, easing = LinearEasing)),
-        label = "wander"
-    )
-    // Which scene is showing, as a continuous position: sceneIndex.fraction. A whole loop
-    // through every scene takes sceneCount * secondsPerScene, and it's a perfect loop (ends
-    // exactly where it started) so the restart is invisible too.
-    val sceneCount = 5
-    val secondsPerScene = 24_000
-    val scenePosition by infinite.animateFloat(
-        initialValue = 0f, targetValue = sceneCount.toFloat(),
-        animationSpec = infiniteRepeatable(tween(secondsPerScene * sceneCount, easing = LinearEasing)),
-        label = "scenePosition"
-    )
-
-    val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
-    val tertiary = MaterialTheme.colorScheme.tertiary
     val background = MaterialTheme.colorScheme.background
-
-    Box(modifier = modifier.background(background)) {
-        Canvas(modifier = Modifier.matchParentSize()) {
-            val sceneIndex = scenePosition.toInt().coerceIn(0, sceneCount - 1)
-            val nextIndex = (sceneIndex + 1) % sceneCount
-            val localT = scenePosition - sceneIndex
-            // Only actually cross-fade during the last third of each scene's turn - the rest of
-            // the time only one scene is drawn at full strength, so there's no visible fade
-            // happening most of the time, just an occasional, very slow hand-off.
-            val blend = ((localT - 0.66f) / 0.34f).coerceIn(0f, 1f)
-
-            drawAmbientScene(sceneIndex, 1f - blend, rotation, pulse, wander, primary, secondary, tertiary, background)
-            drawAmbientScene(nextIndex, blend, rotation, pulse, wander, primary, secondary, tertiary, background)
-        }
-    }
-}
-
-private fun DrawScope.drawAmbientScene(
-    index: Int,
-    alpha: Float,
-    rotation: Float,
-    pulse: Float,
-    wander: Float,
-    primary: Color,
-    secondary: Color,
-    tertiary: Color,
-    background: Color
-) {
-    if (alpha <= 0f) return
-    when (index) {
-        0 -> drawSweepScene(rotation, alpha, primary, secondary, tertiary, background)
-        1 -> drawPulseScene(pulse, alpha, primary, tertiary)
-        2 -> drawWanderScene(wander, alpha, primary, secondary)
-        3 -> drawDiagonalScene(wander, alpha, secondary, tertiary)
-        else -> drawStarfieldScene(wander, alpha, primary, secondary, tertiary)
-    }
-}
-
-/**
- * A slow twinkling starfield, echoing the logo's own starry-space artwork - small scattered
- * points of light that gently fade in and out at different offsets so they never blink in
- * unison.
- */
-private fun DrawScope.drawStarfieldScene(
-    phase: Float,
-    alpha: Float,
-    primary: Color,
-    secondary: Color,
-    tertiary: Color
-) {
-    val starCount = 46
-    val colors = listOf(primary, secondary, tertiary)
-    for (i in 0 until starCount) {
-        // Deterministic pseudo-random layout per star index, stable across recompositions.
-        val seed = i * 92821
-        val nx = ((seed % 977) / 977f)
-        val ny = (((seed / 977) % 953) / 953f)
-        val twinklePhase = Math.toRadians((phase * (1.3f + (i % 5) * 0.4f) + i * 37f).toDouble())
-        val twinkle = (kotlin.math.sin(twinklePhase).toFloat() + 1f) / 2f
-        val starAlpha = (0.15f + 0.55f * twinkle) * alpha
-        val starRadius = (1.2f + (i % 3) * 0.9f)
-        drawCircle(
-            color = colors[i % colors.size].copy(alpha = starAlpha),
-            radius = starRadius,
-            center = androidx.compose.ui.geometry.Offset(size.width * nx, size.height * ny)
-        )
-    }
-}
-
-private fun DrawScope.drawSweepScene(
-    angleDeg: Float,
-    alpha: Float,
-    primary: Color,
-    secondary: Color,
-    tertiary: Color,
-    background: Color
-) {
-    rotate(angleDeg) {
-        drawRect(
-            brush = Brush.sweepGradient(
-                listOf(
-                    primary.copy(alpha = 0.20f * alpha),
-                    tertiary.copy(alpha = 0.14f * alpha),
-                    secondary.copy(alpha = 0.16f * alpha),
-                    background.copy(alpha = 0f),
-                    primary.copy(alpha = 0.20f * alpha)
+    val primary = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = modifier.background(
+            Brush.radialGradient(
+                colors = listOf(
+                    primary.copy(alpha = 0.15f),
+                    background.copy(alpha = 0.98f),
+                    background
                 )
-            ),
-            size = androidx.compose.ui.geometry.Size(size.width * 1.6f, size.height * 1.6f),
-            topLeft = androidx.compose.ui.geometry.Offset(-size.width * 0.3f, -size.height * 0.3f)
-        )
-    }
-}
-
-private fun DrawScope.drawPulseScene(phase: Float, alpha: Float, primary: Color, tertiary: Color) {
-    val scale = 0.85f + 0.3f * phase
-    drawCircle(
-        brush = Brush.radialGradient(
-            listOf(primary.copy(alpha = 0.22f * alpha), tertiary.copy(alpha = 0.10f * alpha), Color.Transparent),
-            center = center,
-            radius = size.minDimension * 0.7f * scale
-        ),
-        radius = size.minDimension * 0.7f * scale,
-        center = center
-    )
-}
-
-private fun DrawScope.drawWanderScene(angleDeg: Float, alpha: Float, primary: Color, secondary: Color) {
-    val rad1 = Math.toRadians(angleDeg.toDouble())
-    val rad2 = Math.toRadians((angleDeg + 150f).toDouble())
-    val radius = size.minDimension * 0.32f
-    val c1 = androidx.compose.ui.geometry.Offset(
-        (size.width * 0.5f + (kotlin.math.cos(rad1) * size.width * 0.28f)).toFloat(),
-        (size.height * 0.5f + (kotlin.math.sin(rad1) * size.height * 0.22f)).toFloat()
-    )
-    val c2 = androidx.compose.ui.geometry.Offset(
-        (size.width * 0.5f + (kotlin.math.cos(rad2) * size.width * 0.26f)).toFloat(),
-        (size.height * 0.5f + (kotlin.math.sin(rad2) * size.height * 0.24f)).toFloat()
-    )
-    drawCircle(
-        brush = Brush.radialGradient(listOf(primary.copy(alpha = 0.20f * alpha), Color.Transparent), center = c1, radius = radius),
-        radius = radius, center = c1
-    )
-    drawCircle(
-        brush = Brush.radialGradient(listOf(secondary.copy(alpha = 0.18f * alpha), Color.Transparent), center = c2, radius = radius * 0.85f),
-        radius = radius * 0.85f, center = c2
-    )
-}
-
-private fun DrawScope.drawDiagonalScene(angleDeg: Float, alpha: Float, secondary: Color, tertiary: Color) {
-    val t = (kotlin.math.sin(Math.toRadians(angleDeg.toDouble())).toFloat() + 1f) / 2f
-    val start = androidx.compose.ui.geometry.Offset(size.width * (0.1f + 0.2f * t), 0f)
-    val end = androidx.compose.ui.geometry.Offset(size.width * (0.7f - 0.2f * t), size.height)
-    drawRect(
-        brush = Brush.linearGradient(
-            colors = listOf(
-                secondary.copy(alpha = 0.16f * alpha),
-                tertiary.copy(alpha = 0.12f * alpha),
-                Color.Transparent
-            ),
-            start = start,
-            end = end
+            )
         )
     )
 }
 
 /**
- * The square artwork "box": gently bobs up and down to feel like it's floating above the
- * background, casts a soft coloured shadow for depth, and can be swiped left/right to skip to
- * the next/previous song without needing to reach for the buttons below.
+ * One clean square only. The artwork is drawn at its natural aspect ratio with no scale-up crop,
+ * no glow and no shadow layer behind it. When artwork is missing, ArtworkView places the real
+ * Aditya app logo directly into this same square.
  */
 @Composable
 private fun FloatingArtwork(
@@ -526,49 +348,28 @@ private fun FloatingArtwork(
     onSwipePrevious: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val infinite = rememberInfiniteTransition(label = "floatBob")
-    val bobOffset by infinite.animateFloat(
-        initialValue = -13f,
-        targetValue = 13f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2600, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "bob"
-    )
-
-    val density = LocalDensity.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
     val swipeThresholdPx = with(density) { 90.dp.toPx() }
     var dragAccum by remember { mutableFloatStateOf(0f) }
-    val cornerShape = RoundedCornerShape(40.dp)
 
     Crossfade(targetState = song.id, label = "artworkCrossfade") {
-        Box(
-            modifier = modifier
-                .graphicsLayer { translationY = bobOffset }
-                // Keep the floating effect without adding any second shadow/glow square around
-                // the artwork. The visible boundary comes only from the artwork's own clipped box.
-                .draggable(
-                    orientation = Orientation.Horizontal,
-                    state = rememberDraggableState { delta -> dragAccum += delta },
-                    onDragStopped = {
-                        when {
-                            dragAccum <= -swipeThresholdPx -> onSwipeNext()
-                            dragAccum >= swipeThresholdPx -> onSwipePrevious()
-                        }
-                        dragAccum = 0f
+        ArtworkView(
+            artworkUri = song.albumArtUri,
+            modifier = modifier.draggable(
+                orientation = Orientation.Horizontal,
+                state = rememberDraggableState { delta -> dragAccum += delta },
+                onDragStopped = {
+                    when {
+                        dragAccum <= -swipeThresholdPx -> onSwipeNext()
+                        dragAccum >= swipeThresholdPx -> onSwipePrevious()
                     }
-                )
-        ) {
-            ArtworkView(
-                artworkUri = song.albumArtUri,
-                modifier = Modifier.fillMaxSize(),
-                imageSizePx = 720,
-                contentDescription = "Album artwork",
-                cropScale = 1.08f,
-                shape = cornerShape
-            )
-        }
+                    dragAccum = 0f
+                }
+            ),
+            imageSizePx = 512,
+            contentDescription = "Album artwork",
+            shape = RoundedCornerShape(40.dp)
+        )
     }
 }
 
@@ -580,14 +381,22 @@ private fun EqualizerBottomSheet(
     onDismiss: () -> Unit
 ) {
     val state by viewModel.equalizerState.collectAsState()
-    val presets = listOf(PRESET_FLAT, PRESET_POP, PRESET_ROCK, PRESET_DANCE, PRESET_CLASSICAL, PRESET_VOCAL)
+    val presets = listOf(
+        PRESET_FLAT,
+        PRESET_POP,
+        PRESET_ROCK,
+        PRESET_DANCE,
+        PRESET_DJ,
+        PRESET_VOCAL
+    )
+    val ready = supported && state.bandLevelsMb.isNotEmpty()
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 18.dp)
                 .padding(bottom = 30.dp)
         ) {
             Row(
@@ -596,10 +405,17 @@ private fun EqualizerBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Equalizer", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(
-                        if (supported) "Pure sound bypass is the default"
-                        else "Equalizer is not available for this audio session",
+                        "DJ Equalizer",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        when {
+                            !supported -> "Hardware equalizer is not available for this audio session"
+                            !ready -> "Preparing the device equalizer…"
+                            else -> "Real audio-session EQ • 10-band control when supported"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -611,63 +427,28 @@ private fun EqualizerBottomSheet(
                 )
             }
 
-            if (state.headsetProfileName != null) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (state.headsetProfileActive) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(
-                            if (state.headsetProfileActive) "Auto-tuned headset" else "Headset profile selected",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            state.headsetProfileName!!,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        state.headsetProfileSource?.let { source ->
-                            Text(
-                                "Measured source: $source",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-
+            Spacer(Modifier.height(14.dp))
             Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = if (!state.enabled) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
             ) {
                 Row(
-                    Modifier.padding(12.dp),
+                    modifier = Modifier.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        if (state.enabled) Icons.Rounded.GraphicEq else Icons.Rounded.Audiotrack,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    Icon(Icons.Rounded.GraphicEq, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        if (state.enabled) "EQ is shaping the sound" else "Bypass: source audio is left unshaped",
+                        if (state.enabled) "DJ shaping is active" else "Bypass — original audio path is left untouched",
                         style = MaterialTheme.typography.bodyMedium
                     )
                 }
             }
 
             Spacer(Modifier.height(16.dp))
-            Text("Presets", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(7.dp))
+            Text("DJ presets", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -681,39 +462,38 @@ private fun EqualizerBottomSheet(
                     )
                 }
                 if (state.preset == PRESET_CUSTOM) {
-                    FilterChip(selected = true, onClick = {}, enabled = false, label = { Text(PRESET_CUSTOM) })
+                    FilterChip(
+                        selected = true,
+                        onClick = {},
+                        enabled = false,
+                        label = { Text(PRESET_CUSTOM) }
+                    )
                 }
             }
 
             Spacer(Modifier.height(18.dp))
-            ToneSlider("Bass", state.bassDb, supported) { viewModel.setEqualizerBassDb(it) }
-            ToneSlider("Mid", state.midDb, supported) { viewModel.setEqualizerMidDb(it) }
-            ToneSlider("Treble", state.trebleDb, supported) { viewModel.setEqualizerTrebleDb(it) }
+            Text("Frequency faders", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(
+                "Move each fader like a DJ mixer. 0 dB keeps that band flat.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(10.dp))
 
-            if (state.bandLevelsMb.isNotEmpty()) {
-                Spacer(Modifier.height(14.dp))
-                Text("Fine bands", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                Text(
-                    "Vertical controls for precise frequency tuning. 0 dB leaves that band unchanged.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(9.dp))
-
+            if (ready) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
                     verticalAlignment = Alignment.Top
                 ) {
                     state.bandLevelsMb.forEachIndexed { index, level ->
-                        val frequency = state.bandFrequenciesHz.getOrNull(index) ?: 0
-                        VerticalBandSlider(
-                            frequency = formatFrequency(frequency),
+                        DjBandFader(
+                            frequency = formatFrequency(state.bandFrequenciesHz.getOrNull(index) ?: 0),
                             valueMb = level.toInt(),
-                            minMb = state.bandLevelMinMb.toInt(),
-                            maxMb = state.bandLevelMaxMb.toInt(),
+                            minMb = state.bandLevelMinMb,
+                            maxMb = state.bandLevelMaxMb,
                             enabled = supported,
                             onValueChange = { viewModel.setEqualizerBand(index, it) }
                         )
@@ -721,7 +501,7 @@ private fun EqualizerBottomSheet(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
             OutlinedButton(
                 onClick = { viewModel.resetEqualizer() },
                 enabled = supported,
@@ -729,14 +509,14 @@ private fun EqualizerBottomSheet(
             ) {
                 Icon(Icons.Rounded.RestartAlt, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Reset to pure sound")
+                Text("Reset to Flat")
             }
         }
     }
 }
 
 @Composable
-private fun VerticalBandSlider(
+private fun DjBandFader(
     frequency: String,
     valueMb: Int,
     minMb: Int,
@@ -744,11 +524,11 @@ private fun VerticalBandSlider(
     enabled: Boolean,
     onValueChange: (Int) -> Unit
 ) {
-    val trackLength = 178.dp
     val safeMin = minMb.coerceAtMost(maxMb - 1)
+    val safeValue = valueMb.coerceIn(safeMin, maxMb)
 
     Column(
-        modifier = Modifier.width(64.dp),
+        modifier = Modifier.width(54.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -757,71 +537,32 @@ private fun VerticalBandSlider(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )
-        Spacer(Modifier.height(7.dp))
-
-        // Same Material3 Slider component used for Bass/Mid/Treble above - just rotated 90
-        // degrees. It already handles drag tracking, clamping and touch physics correctly (that's
-        // why Bass/Mid/Treble never had this problem); a hand-rolled drag gesture for these
-        // vertical bands was what kept getting stuck partway, sticking to the bottom, or refusing
-        // to reach the top. Reusing the same reliable widget fixes it for good instead of trying
-        // to patch the custom math again.
-        Slider(
-            value = valueMb.toFloat().coerceIn(safeMin.toFloat(), maxMb.toFloat()),
-            onValueChange = { onValueChange(it.roundToInt()) },
-            valueRange = safeMin.toFloat()..maxMb.toFloat(),
-            enabled = enabled,
+        Spacer(Modifier.height(6.dp))
+        Box(
             modifier = Modifier
-                .width(trackLength)
-                .graphicsLayer {
-                    rotationZ = 270f
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
-                }
-                .layout { measurable, constraints ->
-                    val placeable = measurable.measure(
-                        androidx.compose.ui.unit.Constraints(
-                            minWidth = constraints.minHeight,
-                            maxWidth = constraints.maxHeight,
-                            minHeight = constraints.minWidth,
-                            maxHeight = constraints.maxWidth
-                        )
-                    )
-                    layout(placeable.height, placeable.width) {
-                        placeable.place(-placeable.width, 0)
-                    }
-                }
-        )
-
-        Spacer(Modifier.height(7.dp))
+                .width(44.dp)
+                .height(172.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Slider(
+                value = safeValue.toFloat(),
+                onValueChange = { onValueChange(it.roundToInt()) },
+                valueRange = safeMin.toFloat()..maxMb.toFloat(),
+                enabled = enabled,
+                modifier = Modifier
+                    .width(160.dp)
+                    .rotate(-90f)
+            )
+        }
+        Spacer(Modifier.height(6.dp))
         Text(
-            formatGain(valueMb.toShort()),
+            formatGain(safeValue),
             style = MaterialTheme.typography.labelSmall,
-            color = if (valueMb == 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            color = if (safeValue == 0) MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold
         )
     }
-}
-
-@Composable
-private fun ToneSlider(
-    label: String,
-    valueDb: Float,
-    enabled: Boolean,
-    onChange: (Float) -> Unit
-) {
-    Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-    Slider(
-        value = valueDb.coerceIn(-6f, 6f),
-        onValueChange = onChange,
-        valueRange = -6f..6f,
-        steps = 23,
-        enabled = enabled
-    )
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("-6 dB", style = MaterialTheme.typography.labelSmall)
-        Text("${formatDb(valueDb)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        Text("+6 dB", style = MaterialTheme.typography.labelSmall)
-    }
-    Spacer(Modifier.height(8.dp))
 }
 
 @Composable
@@ -873,13 +614,11 @@ private fun formatTimer(ms: Long): String {
     else "%02d:%02d".format(minutes, seconds)
 }
 
-private fun formatGain(mb: Short): String {
+private fun formatGain(mb: Int): String {
     val db = mb / 100f
     return if (db > 0f) "+%.1f".format(db) else "%.1f".format(db)
 }
 
-private fun formatDb(db: Float): String =
-    if (db > 0.05f) "+%.1f dB".format(db) else if (db < -0.05f) "%.1f dB".format(db) else "0 dB"
 
 private fun formatFrequency(hz: Int): String = when {
     hz >= 1000 && hz % 1000 == 0 -> "${hz / 1000} kHz"

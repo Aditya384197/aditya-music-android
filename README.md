@@ -1,4 +1,4 @@
-# ADITYA MUSIC  Premium Android Audio Player 🎵
+# ADITYA MUSIC - Premium Android Audio Player 🎵
 
 **Aditya Music** is a production-quality, lightweight, offline-first Android audio player built with Kotlin, Jetpack Compose, Material Design 3, Android Media3 (ExoPlayer), Room Database, and modern Clean Architecture.
 
@@ -12,7 +12,7 @@ Developed by **Aditya**.
 - 🚀 **100% Offline & Private**: Zero internet permissions, no ads, no trackers, no accounts.
 - ⚡ **Background Playback & MediaSession**: Lock screen controls, rich status notification with album art, Bluetooth controls, wired headset plug/unplug audio focus management.
 - 🎨 **Material Design 3**: Dynamic themes (Light, Dark, AMOLED Black), responsive layouts for small, regular, and large screens.
-- 🎛️ **5-Band Equalizer & Bass Boost**: Real audio session hardware equalizer with Rock, Pop, Classical, Jazz, Vocal presets and custom gain curves.
+- 🎛️ **DJ Equalizer**: Real audio-session equalizer with Flat, Pop, Rock, Dance, DJ and Vocal presets plus per-frequency faders.
 - ⏱️ **Sleep Timer**: Gentle fade-out countdown timer (5m, 10m, 15m, 30m, 45m, 60m, custom).
 - 📁 **Smart MediaStore Scanner**: Rapid background discovery of device tracks without filesystem bloat.
 - 📋 **Playlist & Favorites Engine**: Persistent local storage powered by Room Database with full drag-to-reorder, search, and sort.
