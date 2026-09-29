@@ -26,17 +26,6 @@ jobs:
       - name: Setup Gradle Wrapper and Cache
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Generate offline headset EQ database
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/AutoEq
-          git clone --depth=1 --filter=blob:none --sparse https://github.com/jaakkopasanen/AutoEq.git /tmp/AutoEq
-          git -C /tmp/AutoEq sparse-checkout set results
-          python3 tools/generate_headset_profiles.py \
-            --autoeq-dir /tmp/AutoEq \
-            --output app/src/main/assets/headset_profiles.json
-
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
