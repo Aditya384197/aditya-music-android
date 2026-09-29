@@ -105,6 +105,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     ?.let { _selectedHeadsetProfile.value = it }
             }
         }
+        // React to MediaStore itself changing - a deletion actually completing, a new download
+        // getting indexed, another app touching the library - instead of only ever refreshing
+        // right after our own actions. Debounced because a single delete/scan can fire many rapid
+        // change notifications in a row.
+        viewModelScope.launch {
+            repository.observeLibraryChanges()
+                .debounce(400)
+                .collect { refreshLibrary() }
+        }
     }
 
     private val _openNowPlayingEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -172,8 +181,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (granted) refreshLibrary()
     }
 
+    private var pendingRescan = false
+
     fun refreshLibrary() {
-        if (isScanning.value) return
+        if (isScanning.value) {
+            pendingRescan = true
+            return
+        }
         viewModelScope.launch {
             isScanning.value = true
             try {
@@ -190,6 +204,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
             } finally {
                 isScanning.value = false
+                if (pendingRescan) {
+                    pendingRescan = false
+                    refreshLibrary()
+                }
             }
         }
     }

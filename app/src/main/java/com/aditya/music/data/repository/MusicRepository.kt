@@ -147,6 +147,30 @@ class MusicRepository(
     fun getSongsForPlaylist(playlistId: Long): Flow<List<Long>> = playlistDao.getSongIdsForPlaylist(playlistId)
 
     /**
+     * Emits whenever MediaStore's audio collection actually changes on disk (a file finishes
+     * being deleted, a new download finishes being indexed, another app edits the library, etc).
+     * [MediaStore.createDeleteRequest] performs the real deletion asynchronously after the user
+     * approves it - the approval callback can fire slightly before MediaStore's index has fully
+     * caught up, so refreshing on a fixed delay after approval was a guess that didn't always
+     * land in time. Observing the actual change notification means the refresh happens exactly
+     * when MediaStore is ready, not sometime before or after.
+     */
+    fun observeLibraryChanges(): Flow<Unit> = kotlinx.coroutines.flow.callbackFlow {
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        }
+        val observer = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) {
+                trySend(Unit)
+            }
+        }
+        contentResolver.registerContentObserver(collection, true, observer)
+        awaitClose { contentResolver.unregisterContentObserver(observer) }
+    }
+
+    /**
      * Result of a delete attempt. On Android 10+, deleting a MediaStore item that this app didn't
      * create requires the user to confirm a system dialog first - that dialog can't be shown from
      * here, so [NeedsPermission] hands the caller an IntentSender to launch for that confirmation.

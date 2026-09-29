@@ -152,10 +152,10 @@ fun NowPlayingScreen(
                         song = song,
                         onSwipeNext = { viewModel.playNext() },
                         onSwipePrevious = { viewModel.playPrevious() },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .sizeIn(maxWidth = 400.dp, maxHeight = 400.dp)
+                        // A single fixed, definitely-square size - no fillMaxWidth/aspectRatio/
+                        // sizeIn combination that can end up unequal on a shorter screen, which is
+                        // what was letting the artwork render non-square and get cropped oddly.
+                        modifier = Modifier.size(320.dp)
                     )
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -356,7 +356,7 @@ private fun AmbientAnimatedBackground(modifier: Modifier = Modifier) {
     // Which scene is showing, as a continuous position: sceneIndex.fraction. A whole loop
     // through every scene takes sceneCount * secondsPerScene, and it's a perfect loop (ends
     // exactly where it started) so the restart is invisible too.
-    val sceneCount = 4
+    val sceneCount = 5
     val secondsPerScene = 24_000
     val scenePosition by infinite.animateFloat(
         initialValue = 0f, targetValue = sceneCount.toFloat(),
@@ -401,7 +401,39 @@ private fun DrawScope.drawAmbientScene(
         0 -> drawSweepScene(rotation, alpha, primary, secondary, tertiary, background)
         1 -> drawPulseScene(pulse, alpha, primary, tertiary)
         2 -> drawWanderScene(wander, alpha, primary, secondary)
-        else -> drawDiagonalScene(wander, alpha, secondary, tertiary)
+        3 -> drawDiagonalScene(wander, alpha, secondary, tertiary)
+        else -> drawStarfieldScene(wander, alpha, primary, secondary, tertiary)
+    }
+}
+
+/**
+ * A slow twinkling starfield, echoing the logo's own starry-space artwork - small scattered
+ * points of light that gently fade in and out at different offsets so they never blink in
+ * unison.
+ */
+private fun DrawScope.drawStarfieldScene(
+    phase: Float,
+    alpha: Float,
+    primary: Color,
+    secondary: Color,
+    tertiary: Color
+) {
+    val starCount = 46
+    val colors = listOf(primary, secondary, tertiary)
+    for (i in 0 until starCount) {
+        // Deterministic pseudo-random layout per star index, stable across recompositions.
+        val seed = i * 92821
+        val nx = ((seed % 977) / 977f)
+        val ny = (((seed / 977) % 953) / 953f)
+        val twinklePhase = Math.toRadians((phase * (1.3f + (i % 5) * 0.4f) + i * 37f).toDouble())
+        val twinkle = (kotlin.math.sin(twinklePhase).toFloat() + 1f) / 2f
+        val starAlpha = (0.15f + 0.55f * twinkle) * alpha
+        val starRadius = (1.2f + (i % 3) * 0.9f)
+        drawCircle(
+            color = colors[i % colors.size].copy(alpha = starAlpha),
+            radius = starRadius,
+            center = androidx.compose.ui.geometry.Offset(size.width * nx, size.height * ny)
+        )
     }
 }
 
@@ -508,19 +540,16 @@ private fun FloatingArtwork(
     val density = LocalDensity.current
     val swipeThresholdPx = with(density) { 90.dp.toPx() }
     var dragAccum by remember { mutableFloatStateOf(0f) }
-    val primary = MaterialTheme.colorScheme.primary
     val cornerShape = RoundedCornerShape(40.dp)
 
     Crossfade(targetState = song.id, label = "artworkCrossfade") {
         Box(
             modifier = modifier
                 .graphicsLayer { translationY = bobOffset }
-                .shadow(
-                    elevation = 30.dp,
-                    shape = cornerShape,
-                    ambientColor = primary.copy(alpha = 0.38f),
-                    spotColor = primary.copy(alpha = 0.5f)
-                )
+                // No drop shadow here: a soft coloured glow around a rounded square reads as a
+                // second, fainter square sitting behind it - exactly the "extra box" that kept
+                // showing up around the artwork. The gentle up/down bob is enough on its own to
+                // read as floating, without anything else drawn around the artwork's own edges.
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta -> dragAccum += delta },
