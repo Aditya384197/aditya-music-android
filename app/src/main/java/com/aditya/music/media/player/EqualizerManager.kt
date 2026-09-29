@@ -57,44 +57,64 @@ private val REFERENCE_FREQUENCIES_HZ = intArrayOf(
 
 object EqualizerController {
     private var manager: EqualizerManager? = null
+    private var appContext: Context? = null
+    private var pendingAudioSessionId: Int = 0
     private val _state = MutableStateFlow(EqualizerState())
     val state: StateFlow<EqualizerState> = _state.asStateFlow()
 
-    fun attach(newManager: EqualizerManager) {
-        manager = newManager
-        _state.value = newManager.snapshot()
+    /**
+     * Registers the current audio session without creating an Android audio effect.
+     * This is deliberately lightweight because it is called when a song starts.
+     */
+    fun attachSession(context: Context, audioSessionId: Int) {
+        manager?.release()
+        manager = null
+        appContext = context.applicationContext
+        pendingAudioSessionId = audioSessionId.takeIf { it > 0 } ?: 0
+        _state.value = EqualizerState()
     }
 
-    fun detach(target: EqualizerManager? = null) {
-        if (target == null || manager === target) {
-            manager = null
-            _state.value = EqualizerState()
-        }
+    fun detach() {
+        manager?.release()
+        manager = null
+        appContext = null
+        pendingAudioSessionId = 0
+        _state.value = EqualizerState()
     }
 
     fun initialize() {
-        manager?.initializeIfNeeded()
+        ensureManager()?.initializeIfNeeded()
         sync()
     }
 
     fun setEnabled(enabled: Boolean) {
-        manager?.setEnabled(enabled)
+        ensureManager()?.setEnabled(enabled)
         sync()
     }
 
     fun applyPreset(preset: String) {
-        manager?.applyPreset(preset)
+        ensureManager()?.applyPreset(preset)
         sync()
     }
 
     fun setBandLevel(index: Int, levelMb: Int) {
-        manager?.setBandLevel(index, levelMb)
+        ensureManager()?.setBandLevel(index, levelMb)
         sync()
     }
 
     fun reset() {
-        manager?.reset()
+        ensureManager()?.reset()
         sync()
+    }
+
+    private fun ensureManager(): EqualizerManager? {
+        manager?.let { return it }
+        val context = appContext ?: return null
+        if (pendingAudioSessionId <= 0) return null
+
+        return runCatching {
+            EqualizerManager(context, pendingAudioSessionId)
+        }.getOrNull()?.also { manager = it }
     }
 
     private fun sync() {
@@ -175,7 +195,6 @@ class EqualizerManager(
         }
     }
 
-    fun hasPersistedEnabledState(): Boolean = enabled
 
     fun snapshot(): EqualizerState = EqualizerState(
         supported = supported,

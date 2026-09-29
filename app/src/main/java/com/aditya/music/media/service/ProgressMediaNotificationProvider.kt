@@ -74,31 +74,31 @@ class ProgressMediaNotificationProvider(private val context: Context) :
         base: android.app.Notification,
         mediaSession: androidx.media3.session.MediaSession
     ): android.app.Notification {
-        val player = mediaSession.player
-        val durationMs = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
-        val positionMs = player.currentPosition.coerceIn(
-            0L,
-            if (durationMs > 0) durationMs else Long.MAX_VALUE
-        )
-        val metadata = player.mediaMetadata
-        val art = loadArt(metadata.artworkUri)
-        val backgroundArt = makeBackgroundArt(art)
-
-        val remoteViews = RemoteViews(context.packageName, R.layout.notification_media_progress).apply {
-            setTextViewText(R.id.notif_title, metadata.title?.toString() ?: "Aditya Music")
-            setTextViewText(R.id.notif_artist, metadata.artist?.toString() ?: "")
-            setTextViewText(R.id.notif_elapsed, formatMs(positionMs))
-            setTextViewText(R.id.notif_total, formatMs(durationMs))
-            val progress = if (durationMs > 0) {
-                ((positionMs * 1000L) / durationMs).toInt().coerceIn(0, 1000)
-            } else 0
-            setProgressBar(R.id.notif_progress, 1000, progress, durationMs <= 0)
-            setImageViewBitmap(R.id.notif_art, art)
-            setImageViewBitmap(R.id.notif_background, backgroundArt)
-            setInt(R.id.notif_background, "setImageAlpha", 78)
-        }
-
         return runCatching {
+            val player = mediaSession.player
+            val durationMs = player.duration.takeIf { it > 0 && it != C.TIME_UNSET } ?: 0L
+            val positionMs = player.currentPosition.coerceIn(
+                0L,
+                if (durationMs > 0) durationMs else Long.MAX_VALUE
+            )
+            val metadata = player.mediaMetadata
+            val art = loadArt(metadata.artworkUri)
+            val backgroundArt = makeBackgroundArt(art)
+
+            val remoteViews = RemoteViews(context.packageName, R.layout.notification_media_progress).apply {
+                setTextViewText(R.id.notif_title, metadata.title?.toString() ?: "Aditya Music")
+                setTextViewText(R.id.notif_artist, metadata.artist?.toString() ?: "")
+                setTextViewText(R.id.notif_elapsed, formatMs(positionMs))
+                setTextViewText(R.id.notif_total, formatMs(durationMs))
+                val progress = if (durationMs > 0) {
+                    ((positionMs * 1000L) / durationMs).toInt().coerceIn(0, 1000)
+                } else 0
+                setProgressBar(R.id.notif_progress, 1000, progress, durationMs <= 0)
+                setImageViewBitmap(R.id.notif_art, art)
+                setImageViewBitmap(R.id.notif_background, backgroundArt)
+                setInt(R.id.notif_background, "setImageAlpha", 78)
+            }
+
             androidx.core.app.NotificationCompat.Builder(context, base)
                 .setStyle(MediaStyleNotificationHelper.DecoratedMediaCustomViewStyle(mediaSession))
                 .setCustomContentView(remoteViews)
@@ -116,24 +116,43 @@ class ProgressMediaNotificationProvider(private val context: Context) :
         }
 
         val decoded = if (uri != null) {
-            runCatching {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                }
-            }.getOrNull()
+            runCatching { decodeSampledBitmap(uri, 192) }.getOrNull()
         } else null
 
         val source = decoded ?: runCatching {
             BitmapFactory.decodeResource(context.resources, R.drawable.aditya_logo)
         }.getOrNull() ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
 
-        val scaled = scaleDown(source, 512)
+        val scaled = scaleDown(source, 192)
         if (scaled !== source && !source.isRecycled) source.recycle()
 
         cachedArtKey = key
         cachedArt = scaled
         cachedBackgroundArt = null
         return scaled
+    }
+
+    private fun decodeSampledBitmap(uri: Uri, maxDimension: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, bounds)
+        }
+
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sample = 1
+        val largest = maxOf(bounds.outWidth, bounds.outHeight)
+        while (largest / sample > maxDimension * 2 && sample < 16) {
+            sample *= 2
+        }
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, options)
+        }
     }
 
     private fun makeBackgroundArt(art: Bitmap): Bitmap {

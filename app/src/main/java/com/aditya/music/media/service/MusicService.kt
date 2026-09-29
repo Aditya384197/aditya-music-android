@@ -15,7 +15,6 @@ import androidx.media3.session.MediaSession
 import com.aditya.music.MainActivity
 import com.aditya.music.R
 import com.aditya.music.media.player.EqualizerController
-import com.aditya.music.media.player.EqualizerManager
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -37,7 +36,6 @@ class MusicService : MediaLibraryService() {
 
     private var player: ExoPlayer? = null
     private var mediaSession: MediaLibrarySession? = null
-    private var equalizerManager: EqualizerManager? = null
     private var restoringState = false
     private var notificationProvider: ProgressMediaNotificationProvider? = null
     private val progressTickHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -67,7 +65,11 @@ class MusicService : MediaLibraryService() {
     }
     private val playerListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
-            rebuildEqualizer(audioSessionId)
+            // Register the new session only. Creating the Android Equalizer here can invoke
+            // vendor audio-effect drivers while a track is starting and can crash the whole app
+            // process on some devices. The actual effect is created lazily when the EQ panel is
+            // opened by the user.
+            EqualizerController.attachSession(this@MusicService, audioSessionId)
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
@@ -122,7 +124,9 @@ class MusicService : MediaLibraryService() {
 
         player = exoPlayer
         restorePlaybackState(exoPlayer)
-        if (exoPlayer.audioSessionId > 0) rebuildEqualizer(exoPlayer.audioSessionId)
+        if (exoPlayer.audioSessionId > 0) {
+            EqualizerController.attachSession(this, exoPlayer.audioSessionId)
+        }
 
         val activityIntent = Intent(this, MainActivity::class.java)
         val sessionActivity = PendingIntent.getActivity(
@@ -263,29 +267,6 @@ class MusicService : MediaLibraryService() {
         }
     }
 
-    private fun rebuildEqualizer(audioSessionId: Int) {
-        if (audioSessionId <= 0) return
-
-        equalizerManager?.let { old ->
-            EqualizerController.detach(old)
-            old.release()
-        }
-
-        // Do not construct the Android audio effect when a track starts. The manager is attached
-        // as a lightweight controller and creates the real Equalizer lazily only when the user
-        // opens/changes the EQ. This keeps ordinary playback independent of vendor EQ drivers.
-        runCatching {
-            EqualizerManager(this, audioSessionId)
-        }.onSuccess { manager ->
-            equalizerManager = manager
-            EqualizerController.attach(manager)
-            if (manager.hasPersistedEnabledState()) manager.initializeIfNeeded()
-        }.onFailure {
-            equalizerManager = null
-            EqualizerController.detach()
-        }
-    }
-
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
         return mediaSession
     }
@@ -293,9 +274,7 @@ class MusicService : MediaLibraryService() {
     override fun onDestroy() {
         stopProgressTicker()
         notificationProvider = null
-        EqualizerController.detach(equalizerManager)
-        equalizerManager?.release()
-        equalizerManager = null
+        EqualizerController.detach()
 
         player?.removeListener(playerListener)
         persistPlaybackState()
