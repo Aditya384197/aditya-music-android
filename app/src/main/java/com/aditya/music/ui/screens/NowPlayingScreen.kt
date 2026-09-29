@@ -546,10 +546,8 @@ private fun FloatingArtwork(
         Box(
             modifier = modifier
                 .graphicsLayer { translationY = bobOffset }
-                // No drop shadow here: a soft coloured glow around a rounded square reads as a
-                // second, fainter square sitting behind it - exactly the "extra box" that kept
-                // showing up around the artwork. The gentle up/down bob is enough on its own to
-                // read as floating, without anything else drawn around the artwork's own edges.
+                // Keep the floating effect without adding any second shadow/glow square around
+                // the artwork. The visible boundary comes only from the artwork's own clipped box.
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta -> dragAccum += delta },
@@ -565,9 +563,9 @@ private fun FloatingArtwork(
             ArtworkView(
                 artworkUri = song.albumArtUri,
                 modifier = Modifier.fillMaxSize(),
-                logoSize = 168.dp,
                 imageSizePx = 720,
                 contentDescription = "Album artwork",
+                cropScale = 1.08f,
                 shape = cornerShape
             )
         }

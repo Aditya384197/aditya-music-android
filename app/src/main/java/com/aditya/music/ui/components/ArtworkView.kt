@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -32,6 +33,7 @@ fun ArtworkView(
     logoSize: Dp = Dp.Unspecified,
     imageSizePx: Int,
     contentDescription: String? = null,
+    cropScale: Float = 1f,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(14.dp)
 ) {
     val context = LocalContext.current
@@ -41,7 +43,15 @@ fun ArtworkView(
         Image(
             painter = painterResource(id = R.drawable.aditya_logo),
             contentDescription = contentDescription,
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier
+                .matchParentSize()
+                .graphicsLayer {
+                    // The supplied album/logo artwork contains a small outer halo/padding.
+                    // Scale only the artwork inside the already-clipped square so that the
+                    // unwanted outer square is no longer visible.
+                    scaleX = cropScale
+                    scaleY = cropScale
+                },
             contentScale = ContentScale.Crop
         )
 
@@ -55,7 +65,12 @@ fun ArtworkView(
                         .build()
                 },
                 contentDescription = contentDescription,
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        scaleX = cropScale
+                        scaleY = cropScale
+                    },
                 contentScale = ContentScale.Crop,
                 onSuccess = { artworkFailed = false },
                 onError = { artworkFailed = true }

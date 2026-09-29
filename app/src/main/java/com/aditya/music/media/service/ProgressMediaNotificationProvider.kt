@@ -3,6 +3,9 @@ package com.aditya.music.media.service
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.net.Uri
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
@@ -12,6 +15,7 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaStyleNotificationHelper
 import com.aditya.music.R
+import kotlin.math.roundToInt
 
 /**
  * Native Media3 notification, augmented with a real, always-visible progress bar and
@@ -34,6 +38,12 @@ class ProgressMediaNotificationProvider(private val context: Context) :
     private var lastNotification: android.app.Notification? = null
     private var lastNotificationId: Int = -1
     private var lastMediaSession: androidx.media3.session.MediaSession? = null
+
+    // Notification progress is refreshed every second. Cache the current track artwork so the
+    // ticker does not reopen/decode the same MediaStore stream on every tick.
+    private var cachedArtKey: String? = null
+    private var cachedArt: Bitmap? = null
+    private var cachedBackgroundArt: Bitmap? = null
 
     override fun createNotification(
         mediaSession: androidx.media3.session.MediaSession,
@@ -87,7 +97,9 @@ class ProgressMediaNotificationProvider(private val context: Context) :
             setTextViewText(R.id.notif_total, formatMs(durationMs))
             val progress = if (durationMs > 0) ((positionMs * 1000L) / durationMs).toInt().coerceIn(0, 1000) else 0
             setProgressBar(R.id.notif_progress, 1000, progress, durationMs <= 0)
-            setImageViewBitmap(R.id.notif_art, loadArt(metadata.artworkUri))
+            val art = loadArt(metadata.artworkUri)
+            setImageViewBitmap(R.id.notif_art, art)
+            setImageViewBitmap(R.id.notif_background, loadBackgroundArt(metadata.artworkUri, art))
         }
 
         return runCatching {
@@ -95,25 +107,69 @@ class ProgressMediaNotificationProvider(private val context: Context) :
                 .setStyle(MediaStyleNotificationHelper.DecoratedMediaCustomViewStyle(mediaSession))
                 .setCustomContentView(remoteViews)
                 .setCustomBigContentView(remoteViews)
-                .setColorized(true)
+                // Do not colorize the whole notification with an opaque surface. The custom
+                // layout now carries a dimmed cover image, allowing the artwork to show through.
+                .setColorized(false)
                 .setColor(context.getColor(R.color.aditya_dark_surface))
                 .build()
         }.getOrDefault(base)
     }
 
     private fun loadArt(uri: Uri?): Bitmap {
-        if (uri != null) {
+        val key = uri?.toString() ?: "__aditya_fallback__"
+        if (cachedArtKey == key) {
+            cachedArt?.let { return it }
+        }
+
+        val decoded = if (uri != null) {
             runCatching {
                 context.contentResolver.openInputStream(uri)?.use { stream ->
                     BitmapFactory.decodeStream(stream)
                 }
-            }.getOrNull()?.let { return it }
+            }.getOrNull()
+        } else {
+            null
         }
-        return runCatching {
+
+        val source = decoded ?: runCatching {
             BitmapFactory.decodeResource(context.resources, R.drawable.aditya_logo)
-        }.getOrElse {
-            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+        }.getOrNull() ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+
+        val scaled = scaleDown(source, 512)
+        if (scaled !== source && !source.isRecycled) {
+            source.recycle()
         }
+
+        cachedArtKey = key
+        cachedArt = scaled
+        cachedBackgroundArt = null
+        return scaled
+    }
+
+    private fun loadBackgroundArt(uri: Uri?, art: Bitmap): Bitmap {
+        val key = uri?.toString() ?: "__aditya_fallback__"
+        if (cachedArtKey == key) {
+            cachedBackgroundArt?.let { return it }
+        }
+
+        val background = Bitmap.createBitmap(art.width, art.height, Bitmap.Config.ARGB_8888)
+        Canvas(background).apply {
+            drawBitmap(art, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            // Keep the cover recognisable but subdued behind the notification text.
+            drawColor(Color.argb(88, 0, 0, 0))
+        }
+        cachedArtKey = key
+        cachedBackgroundArt = background
+        return background
+    }
+
+    private fun scaleDown(bitmap: Bitmap, maxDimension: Int): Bitmap {
+        val maxSide = maxOf(bitmap.width, bitmap.height)
+        if (maxSide <= maxDimension) return bitmap
+        val ratio = maxDimension.toFloat() / maxSide.toFloat()
+        val width = (bitmap.width * ratio).roundToInt().coerceAtLeast(1)
+        val height = (bitmap.height * ratio).roundToInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(bitmap, width, height, true)
     }
 
     private fun formatMs(ms: Long): String {

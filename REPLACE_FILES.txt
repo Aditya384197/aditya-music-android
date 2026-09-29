@@ -1,0 +1,16 @@
+Aditya Music — files changed for the current fix
+
+Replace these 5 files at the exact same paths in the repository:
+1. app/src/main/java/com/aditya/music/data/repository/MusicRepository.kt
+2. app/src/main/java/com/aditya/music/ui/components/ArtworkView.kt
+3. app/src/main/java/com/aditya/music/ui/screens/NowPlayingScreen.kt
+4. app/src/main/java/com/aditya/music/media/service/ProgressMediaNotificationProvider.kt
+5. app/src/main/res/layout/notification_media_progress.xml
+
+Changes:
+- Fixes the current build failure: unresolved reference: awaitClose.
+- Lightly crops the Now Playing artwork (8%) so the unwanted outer halo/extra square is not visible.
+- Makes the expanded music notification more compact vertically.
+- Adds the current song artwork as a faint, darkened notification background.
+- Removes the opaque colorized notification background so the artwork can show through.
+- Caches notification artwork so the 1-second progress ticker does not decode the same image repeatedly.
