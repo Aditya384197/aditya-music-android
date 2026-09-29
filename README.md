@@ -1,4 +1,4 @@
-# ADITYA MUSIC - Premium Android Audio Player 🎵
+# ADITYA MUSIC  Premium Android Audio Player 🎵
 
 **Aditya Music** is a production-quality, lightweight, offline-first Android audio player built with Kotlin, Jetpack Compose, Material Design 3, Android Media3 (ExoPlayer), Room Database, and modern Clean Architecture.
 
