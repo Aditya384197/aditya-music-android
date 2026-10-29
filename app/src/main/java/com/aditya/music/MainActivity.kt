@@ -10,10 +10,19 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -23,9 +32,9 @@ import com.aditya.music.ui.theme.AdityaMusicTheme
 import com.aditya.music.ui.viewmodel.MusicViewModel
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import java.io.File
 
 class MainActivity : ComponentActivity() {
-
     private val viewModel: MusicViewModel by viewModels()
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
@@ -42,13 +51,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         checkAndRequestAudioPermission()
         setupMediaController()
+
+        val crashReportFile = File(filesDir, AdityaMusicApp.CRASH_REPORT_FILE)
+        var savedCrashReport by mutableStateOf(
+            runCatching {
+                if (crashReportFile.exists()) crashReportFile.readText() else null
+            }.getOrNull()
+        )
 
         setContent {
             val themeMode by viewModel.themeMode.collectAsState()
             val useDarkTheme = themeMode != "light"
+            val clipboard = LocalClipboardManager.current
 
             AdityaMusicTheme(darkTheme = useDarkTheme, amoled = themeMode == "amoled") {
                 Surface(
@@ -59,6 +75,33 @@ class MainActivity : ComponentActivity() {
                         viewModel = viewModel,
                         onRequestPermission = { checkAndRequestAudioPermission() }
                     )
+
+                    savedCrashReport?.let { report ->
+                        AlertDialog(
+                            onDismissRequest = { },
+                            title = { Text("पिछले क्रैश की रिपोर्ट") },
+                            text = {
+                                Text(
+                                    text = report,
+                                    modifier = Modifier
+                                        .heightIn(max = 420.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    clipboard.setText(AnnotatedString(report))
+                                }) { Text("रिपोर्ट कॉपी करें") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = {
+                                    runCatching { crashReportFile.delete() }
+                                    savedCrashReport = null
+                                }) { Text("बंद करें और हटाएँ") }
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -76,9 +119,7 @@ class MainActivity : ComponentActivity() {
                 viewModel.onPermissionResult(true)
                 requestNotificationPermissionIfNeeded()
             }
-            else -> {
-                requestPermissionLauncher.launch(permission)
-            }
+            else -> requestPermissionLauncher.launch(permission)
         }
     }
 
