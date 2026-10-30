@@ -1,10 +1,2 @@
-# Media3 ExoPlayer Proguard
--keep class androidx.media3.** { *; }
--dontwarn androidx.media3.**
-
-# Room
--keep class * extends androidx.room.RoomDatabase
--dontwarn androidx.room.paging.**
-
-# Aditya Music Models
--keep class com.aditya.music.data.model.** { *; }
+# Media3 and Compose are handled by their published consumer rules.
+# Keep app-specific rules here when reflection-based features are added.

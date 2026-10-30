@@ -1,67 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Permissions for local media playback (Offline-only, zero internet) -->
-    <!-- Android 13+ (API 33+) -->
+    <!-- Local/offline music library access. No INTERNET permission is requested. -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <!-- Android 12 and below -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
-    <!-- Foreground playback service -->
+    <!-- Playback notification and background playback service. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- Optional audio fx modifiers -->
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-
     <application
-        android:name=".AdityaMusicApp"
-        android:allowBackup="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
-        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
         android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AdityaMusic"
-        tools:targetApi="34">
+        android:theme="@style/Theme.Music"
+        android:usesCleartextTraffic="false">
 
-        <!-- Main Launcher Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.AdityaMusic"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Support opening audio files directly from file managers -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="audio/*" />
-            </intent-filter>
         </activity>
 
-        <!-- Android Media3 MediaSession Service for background playback -->
         <service
-            android:name=".media.service.MusicService"
+            android:name=".playback.MusicPlaybackService"
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
-                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
-
     </application>
-
 </manifest>
